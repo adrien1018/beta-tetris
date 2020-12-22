@@ -1,0 +1,5 @@
+*.so
+*.pyd
+__pycache__/
+build/
+tetris
