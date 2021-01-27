@@ -29,6 +29,7 @@ class Tetris {
     MoveType type;
   };
   struct MoveSequence {
+    bool valid;
     std::vector<Move> start;
     // final movements (that is, movements can't be done at start, usually spins and tucks)
     std::vector<Move> fin;
@@ -44,62 +45,78 @@ class Tetris {
 
   // # Game state
   int start_level_, level_, lines_, score_, pieces_;
-  int now_, next_; // piece
+  int now_piece_, next_piece_; // piece
   Field field_;
 
   // # Parameters
   // Movement model
   double hz_avg_, hz_dev_;
   // The actual hz is sampled from NormalDistribution(hz_avg_, hz_dev_)
-  // Note that for DAS we can set hz_avg_ = 10, hz_dev_ = 0
+  // Note that for default DAS we can set hz_avg_ = 10, hz_dev_ = 0
   double first_tap_max_; // in milliseconds
   // The actual first-tap delay is sampled from UniformDistribution(0, first_tap_max_)
+  // DAS's effect:
+  //  (1) Try to quicktap if the placement is infeasible
+  //  (2) The next piece after microadjustment / spins / spintucks / quicktap
+  //      would have more delay (specifically, (8/3) / hz_avg_) because of
+  //      uncharged DAS
+  //  (3) Use DAS(Miss|Add)LRTapMultiplier instead
+  bool das_;
 
+  // For simplicity, we assume a fixed microadjustment delay (the first
+  //   microadjustment input would be done at exactly this time)
   double microadj_delay_; // in milliseconds
-  // For simplicity, we assume a fixed microadjustment delay
 
   // Misdrop model
   double base_misdrop_rate_; // base misdrop rate
-  double misdrop_param_; // in milliseconds
-  // The actual base misdrop rate will be ((misdrop_param_ / x)^1.5+1)*base_misdrop_rate_,
-  //   where x is the dropping time of the previous piece
-  //   (this simulates that it is more likely to misdrop with less thinking time)
+  double misdrop_param_time_; // in milliseconds
+  double misdrop_param_pow_; // in milliseconds
+  // The actual base misdrop rate will be ((misdrop_param_time_ / x)^misdrop_param_pow_+1)*base_misdrop_rate_,
+  //   where x is min(dropping time of the previous piece, current piece)
+  //   (this simulates that it is more likely to misdrop with less thinking time
+  //    or less dropping time)
   // Misdrop multiplier for each misdrop types
-  //   (the multiplier will be multiplied with the base misdrop rate to get the actual misdrop rate):
+  //   (the multiplier will be multiplied with the base misdrop rate to get the
+  //    actual misdrop rate):
   //   1. Missing L/R tap (for each tap count)
   static constexpr double kMissLRTapMultiplier_[] = {0.0, 0.4, 1.0, 1.0, 1.5, 2.5};
+  static constexpr double kDASMissLRTapMultiplier_[] = {0.0, 0.4, 0.6, 0.6, 0.6, 0.6};
   //   2. Missing A/B tap
   static constexpr double kMissABTapMultiplier_ = 1.0;
   //   3. Additional L/R tap (for each tap count)
   static constexpr double kAddLRTapMultiplier_[] = {0.0, 1.0, 1.0, 1.0, 0.4, 0.0};
-  //   4. Random placement (that is, sample a feasible piece placement at random)
-  static constexpr double kRandomPlacementMultipler_ = 0.2;
-  //   5. Miss tuck
-  static constexpr double kMissTuckMultiplier_ = 1.0;
-  //   6. Miss spin
-  static constexpr double kMissSpinMultiplier_ = 2.0;
-  //   7. Miss spin-tuck
-  static constexpr double kMissSpinTuckMultiplier_ = 6.0;
-  //   8. Miss microadjustment
-  static constexpr double kMissMicroMultiplier_ = 2.0;
-  //   9. The next piece after any misdrop will have higher misdrop rate
+  static constexpr double kDASAddLRTapMultiplier_[] = {0.0, 1.0, 1.0, 1.0, 1.0, 0.0};
+  //   4. Miss tuck
+  static constexpr double kMissTuckMultiplier_ = 2.0;
+  //   5. Miss spin
+  static constexpr double kMissSpinMultiplier_ = 4.0;
+  //   6. Miss spin-tuck
+  static constexpr double kMissSpinTuckMultiplier_ = 7.0;
+  //   7. Miss (each) microadjustment
+  static constexpr double kMissMicroMultiplier_ = 3.0;
+  //   8. The next piece after any misdrop will have higher misdrop rate
   static constexpr double kAfterMisdropMultiplier_ = 2.0;
+  //   9. The next piece after any microadjustment will have higher misdrop rate
+  static constexpr double kAfterMircoMultiplier_ = 1.3;
+  // Note: The training process would try suboptimal moves, so we don't simulate
+  //   misdrops due to incorrect decision.
   // Again, for simplicity, we fix all the multipliers here.
-  // I assigned these multipliers at my will; a future work may be analyzing
-  //   human-played games to get a more promising misdrop model.
+  // I assigned these multipliers at my will, so some of them would differ a lot
+  //   from human behavior. A future work can be analyzing human-played games to
+  //   get a more promising misdrop model.
   double prev_drop_time_; // in milliseconds
-  bool prev_misdrop_;
+  bool prev_misdrop_, prev_micro_, das_not_charged_;
 
   // Reward model
   int target_; // in points
   static constexpr double kRewardMultiplierBeforeTarget_ = 6e-6;
   static constexpr double kRewardMultiplierAfterTarget_ = 3e-6;
-  static constexpr double kTargetReward = 50;
+  static constexpr double kTargetReward = 100;
   // The agent will get 6e-6 reward per point before reaching the target
-  //   (that is, 6 per max-out), and get 50 reward immediately when reaching
+  //   (that is, 6 per max-out), and get 100 reward immediately when reaching
   //   the target; after that, 3e-6 reward per point.
-  // We use this to guide the agent toward the appropriate aggression to reach
-  //   the point target.
+  // We use this to guide the agent toward the appropriate aggression to
+  //   maximize the probability of reaching the point target.
   static constexpr double kInfeasibleReward = -0.2;
   // Provide a large reward deduction if the agent makes an infeasible placement
   // "Infeasible" placements are those cannot be done by +3σ tapping speeds
@@ -109,16 +126,18 @@ class Tetris {
   //   this can guide the agent to avoid high-risk movements
 
   // # Game constants
-  // Tetraminos
+  // Piece generation probabilities
   static constexpr int kTransitionProb_[kT][kT] = {
-    {1, 5, 6, 5, 5, 5, 5},
-    {6, 1, 5, 5, 5, 5, 5},
-    {5, 6, 1, 5, 5, 5, 5},
-    {5, 5, 5, 2, 5, 5, 5},
-    {5, 5, 5, 5, 2, 5, 5},
-    {6, 5, 5, 5, 5, 1, 5},
-    {5, 5, 5, 5, 6, 5, 1},
+  // T  J  Z  O  S  L  I (next)
+    {1, 5, 6, 5, 5, 5, 5}, // T (current)
+    {6, 1, 5, 5, 5, 5, 5}, // J
+    {5, 6, 1, 5, 5, 5, 5}, // Z
+    {5, 5, 5, 2, 5, 5, 5}, // O
+    {5, 5, 5, 5, 2, 5, 5}, // S
+    {6, 5, 5, 5, 5, 1, 5}, // L
+    {5, 5, 5, 5, 6, 5, 1}, // I
   };
+  // Tetraminos
   using Poly_ = std::array<std::pair<int, int>, 4>;
   static const std::vector<Poly_> kBlocks_[kT]; // definition outside
   // Score
@@ -138,24 +157,35 @@ class Tetris {
   static constexpr int kBaseDelay_ = 10;
   static constexpr int kNotGroundDelay_ = 2;
   static constexpr int kLineClearDelay_ = 20;
+  // 1000 / (30 * 525 / 1.001 * 455 / 2 / 2 / (341 * 262 - 0.5) * 3)
+  static constexpr double kFrameLength = 655171. / 39375;
 
   void SpawnPiece_() {
     int next = std::discrete_distribution<int>(
-        kTransitionProb_[next_], kTransitionProb_[next_] + kT)(rng_);
-    now_ = next_;
-    next_ = next;
+        kTransitionProb_[next_piece_], kTransitionProb_[next_piece_] + kT)(rng_);
+    now_piece_ = next_piece_;
+    next_piece_ = next;
   }
 
-  static bool IsGround_(int piece, int cx, int cy, int rotate) {
+  static bool IsGround_(int piece, int x, int rotate) {
     auto& pl = kBlocks_[piece][rotate];
     for (auto& i : pl) {
-      int nx = cx + i.first, ny = cy + i.second;
-      if (nx == kN - 1) return true;
+      if (x + i.first == kN - 1) return true;
     }
     return false;
   }
 
-  using Map_ = std::vector<std::array<std::array<int8_t, kM + 2>, kN + 2>>;
+  static double GetDropTime_(int piece, int x, int rotate, int level,
+                             bool clear) {
+    return (x + 1 + kBaseDelay_ +
+            (IsGround_(piece, x, rotate) ? 0 : kNotGroundDelay_) +
+            (clear ? kLineClearDelay_ : 0)) *
+           kFrameLength;
+  }
+
+  template <class T>
+  using CMap_ = std::vector<std::array<std::array<T, kM + 2>, kN + 2>>;
+  using Map_ = CMap_<uint8_t>;
 
   static Map_ GetMap_(const Field& field, int poly) {
     const size_t R = kBlocks_[poly].size();
@@ -191,45 +221,90 @@ class Tetris {
 
   struct Node_ {
     // dir: 1(down) 2(rotateL) 3(rotateR) 4(left) 5(right)
-    int r, x, y, dir;
+    int r, x, y, dir, n;
     Weight_ w;
     bool operator<(const Node_& a) const { return a.w < w; }
   };
 
-  static Map_ Dijkstra_(const Map_& v, int cx, int cy, int rotate,
-                        bool reverse) {
-    const size_t R = v.size();
+  // Highest possible move
+  static Map_ Dijkstra_(const Map_& v, int cx, int cy, int rotate) {
+    const int R = v.size();
     ++cx, ++cy; // start
     Map_ ret(R, Map_::value_type{});
     if (!v[rotate][cx][cy]) return ret;
-    std::vector<std::array<std::array<Weight_, kM + 2>, kN + 2>> d(v.size());
+    CMap_<Weight_> d(v.size());
     for (auto& i : d) for (auto& j : i) for (auto& k : j) k = {16384, 0, 0};
     std::priority_queue<Node_> pq;
-    pq.push({rotate, cx, cy, 0, {0, 0, 0}});
+    pq.push({rotate, cx, cy, 0, 0, {0, 0, 0}});
     d[rotate][cx][cy] = {0, 0, 0};
     while (!pq.empty()) {
       Node_ nd = pq.top();
       pq.pop();
       if (d[nd.r][nd.x][nd.y] < nd.w) continue;
       ret[nd.r][nd.x][nd.y] = nd.dir;
+      // Move as high as possible
       Weight_ wp = {(uint16_t)(nd.w.step + 1), nd.w.weight,
-                    (uint16_t)(nd.w.height + (reverse ? kN - nd.x : nd.x))};
+                    (uint16_t)(nd.w.height + nd.x)};
       auto Relax = [&](int r, int x, int y, Weight_ w, uint8_t dir) {
         w.weight += dir;
         if (v[r][x][y] > 0 && w < d[r][x][y]) {
-          pq.push({r, x, y, dir, w});
+          pq.push({r, x, y, dir, 0, w});
           d[r][x][y] = w;
         }
       };
       Relax(nd.r, nd.x + 1, nd.y, nd.w, 1);
+      // Try rotate before move
       if (R != 1) {
-        int r1 = nd.r == (int)R - 1 ? 0 : nd.r + 1;
+        int r1 = nd.r == R - 1 ? 0 : nd.r + 1;
         int r2 = nd.r == 0 ? R - 1 : nd.r - 1;
         Relax(r1, nd.x, nd.y, wp, 2);
         Relax(r2, nd.x, nd.y, wp, 3);
       }
       Relax(nd.r, nd.x, nd.y - 1, wp, 4);
       Relax(nd.r, nd.x, nd.y + 1, wp, 5);
+    }
+    return ret;
+  }
+
+  // Lowest possible move (constrained to a specific move sequence)
+  static Map_ Dijkstra_(const Map_& v, int cx, int cy, int rotate,
+                        const std::vector<std::pair<int, MoveType>>& moves) {
+    const int R = v.size(), N = moves.size();
+    ++cx, ++cy; // start
+    Map_ ret(R, Map_::value_type{});
+    if (!v[rotate][cx][cy]) return ret;
+    std::vector<CMap_<Weight_>> d(N + 1, CMap_<Weight_>(v.size()));
+    for (auto& r : d) {
+      for (auto& i : r) for (auto& j : i) for (auto& k : j) k = {16384, 0, 0};
+    }
+    std::priority_queue<Node_> pq;
+    pq.push({rotate, cx, cy, 0, 0, {0, 0, 0}});
+    d[0][rotate][cx][cy] = {0, 0, 0};
+    while (!pq.empty()) {
+      Node_ nd = pq.top();
+      pq.pop();
+      if (d[nd.n][nd.r][nd.x][nd.y] < nd.w) continue;
+      ret[nd.r][nd.x][nd.y] = nd.dir;
+      // Move as low as possible
+      Weight_ wp = {(uint16_t)(nd.w.step + 1), nd.w.weight,
+                    (uint16_t)(nd.w.height + kN - nd.x)};
+      auto Relax = [&](int r, int x, int y, int n, Weight_ w, uint8_t dir) {
+        w.weight += dir;
+        if (v[r][x][y] > 0 && w < d[n][r][x][y]) {
+          pq.push({r, x, y, dir, n, w});
+          d[n][r][x][y] = w;
+        }
+      };
+      Relax(nd.r, nd.x + 1, nd.y, nd.n, nd.w, 1);
+      if (nd.n == N) continue;
+      int r1 = nd.r == R - 1 ? 0 : nd.r + 1;
+      int r2 = nd.r == 0 ? R - 1 : nd.r - 1;
+      switch (moves[nd.n].second) {
+        case MoveType::kA: Relax(r1, nd.x, nd.y, nd.n + 1, wp, 2); break;
+        case MoveType::kB: Relax(r2, nd.x, nd.y, nd.n + 1, wp, 3); break;
+        case MoveType::kL: Relax(nd.r, nd.x, nd.y - 1, nd.n + 1, wp, 4); break;
+        case MoveType::kR: Relax(nd.r, nd.x, nd.y + 1, nd.n + 1, wp, 5); break;
+      }
     }
     return ret;
   }
@@ -258,35 +333,40 @@ class Tetris {
     return ret;
   }
 
+
  public:
   Tetris(uint64_t seed = 0) : rng_(seed) {
     ResetGame(18);
   }
 
   void ResetGame(int start_level, double hz_avg = 10, double hz_dev = 0,
-                 double first_tap_max = 0, double microadj_delay = 300,
-                 double base_misdrop_rate = 5e-3, double misdrop_param = 250,
-                 int target = 1000000) {
+                 bool das = true, double first_tap_max = 0,
+                 double microadj_delay = 400, double base_misdrop_rate = 5e-3,
+                 double misdrop_param_time = 250,
+                 double misdrop_param_pow = 1.5, int target = 1000000) {
     start_level_ = start_level;
     level_ = start_level;
     lines_ = 0;
     score_ = 0;
-    next_ = 0;
+    next_piece_ = 0;
     pieces_ = 0;
     SpawnPiece_();
     SpawnPiece_();
     for (auto& i : field_) std::fill(i.begin(), i.end(), false);
     hz_avg_ = hz_avg;
     hz_dev_ = hz_dev;
+    das_ = das;
     first_tap_max_ = first_tap_max;
     microadj_delay_ = microadj_delay;
     base_misdrop_rate_ = base_misdrop_rate;
-    misdrop_param_ = misdrop_param;
-    prev_misdrop_ = false;
+    misdrop_param_time_ = misdrop_param_time;
+    misdrop_param_pow_ = misdrop_param_pow;
     prev_drop_time_ = 1800;
+    prev_misdrop_ = false;
+    prev_micro_ = false;
+    das_not_charged_ = false;
     target_ = target;
   }
-
 
   static int PlaceField(Field& field, int piece, int cx, int cy, int rotate) {
     auto& pl = kBlocks_[piece][rotate];
@@ -310,10 +390,20 @@ class Tetris {
     return ans;
   }
 
+  /// For training
+
+  /// For evaluating
+  void SetNowPiece(int piece) { now_piece_ = piece; }
+  void SetNextPiece(int piece) { next_piece_ = piece; }
+
+
+
+  // Helpers
+
   using PlaceMap = std::vector<std::array<std::array<bool, kM>, kN>>;
 
   static PlaceMap GetPlacements(const Field& field, int piece) {
-    Map_ mp = GetMap_(field, piece);
+    Map_ mp = Dijkstra_(GetMap_(field, piece), 0, 5, 0);
     PlaceMap ret(mp.size(), PlaceMap::value_type{});
     for (size_t r = 0; r < mp.size(); r++) {
       for (size_t x = 0; x < kN; x++) {
@@ -328,25 +418,28 @@ class Tetris {
   static MoveSequence GetMoveSequence(
       const Field& field, int piece, int start_x, int start_y, int start_rotate,
       int end_x, int end_y, int end_rotate) {
+    MoveSequence ret{};
+    if (start_x == end_x && start_y == end_y && start_rotate == end_rotate) {
+      ret.valid = true;
+      return ret;
+    }
+
     Map_ mp = GetMap_(field, piece);
-    Map_ mp_lb = Dijkstra_(mp, start_x, start_y, start_rotate, false);
-    Map_ mp_rb = Dijkstra_(mp, start_x, start_y, start_rotate, true);
+    Map_ mp_lb = Dijkstra_(mp, start_x, start_y, start_rotate);
+    if (!mp_lb[end_rotate][end_x + 1][end_y + 1]) return ret; // impossible move
     std::vector<std::pair<int, MoveType>> lb =
         MovesFromMap_(std::move(mp_lb), end_x, end_y, end_rotate);
+    // Get upper bound using the sequence of lb
+    Map_ mp_rb = Dijkstra_(mp, start_x, start_y, start_rotate, lb);
     std::vector<std::pair<int, MoveType>> rb =
         MovesFromMap_(std::move(mp_rb), end_x, end_y, end_rotate);
-    std::unordered_map<MoveType, std::vector<int>> rb_mp;
-    for (size_t i = 0; i < rb.size(); i++) {
-      rb_mp[rb[i].second].push_back(rb[i].first);
+    if (lb.size() != rb.size()) throw 1;
+    for (size_t i = 0; i < lb.size(); i++) {
+      if (lb[i].second != rb[i].second) throw 2L;
+      Move now = {lb[i].first, rb[i].first, lb[i].second};
+      (now.height_start == 0 ? ret.start : ret.fin).push_back(now);
     }
-    for (auto& i : rb_mp) std::reverse(i.second.begin(), i.second.end());
-    MoveSequence ret;
-    for (auto& i : lb) {
-      auto& mp_item = rb_mp[i.second];
-      Move now = {i.first, mp_item.back(), i.second};
-      mp_item.pop_back();
-      (i.first == 0 ? ret.start : ret.fin).push_back(now);
-    }
+    ret.valid = true;
     return ret;
   }
 
@@ -419,28 +512,28 @@ int main() {
   Tetris::Field field = {{
     {{0,0,0,0,0,0,0,0,0,0}},
     {{0,0,0,0,0,0,0,0,0,0}},
-    {{0,0,0,0,0,0,0,0,0,0}},
-    {{0,0,0,0,0,0,0,0,0,0}},
-    {{0,0,0,0,0,0,0,0,0,0}},
-    {{0,0,0,0,0,0,0,0,0,0}},
-    {{0,0,0,0,0,0,0,0,0,0}},
-    {{0,0,0,0,0,0,0,0,0,0}},
-    {{0,0,0,0,0,0,0,0,0,0}},
-    {{0,0,0,0,0,0,0,0,0,0}},
-    {{0,0,0,0,0,0,0,0,0,0}},
-    {{0,0,0,0,0,0,0,0,0,0}},
-    {{0,0,0,0,0,0,0,0,0,0}},
-    {{0,0,0,0,0,0,0,0,0,0}},
-    {{0,0,0,0,0,0,0,0,0,0}},
+    {{0,0,0,1,0,0,0,0,0,0}},
+    {{0,0,0,1,1,0,0,0,0,0}},
+    {{0,0,0,0,1,0,0,0,0,0}},
+    {{0,0,0,0,1,0,0,0,0,0}},
+    {{0,0,0,0,1,0,0,0,0,0}},
+    {{0,0,0,0,1,0,0,0,0,0}},
+    {{0,0,0,0,1,0,0,0,0,0}},
+    {{0,0,0,0,1,0,0,0,0,0}},
+    {{0,0,0,0,1,0,0,0,0,0}},
+    {{0,0,0,0,1,0,0,0,0,0}},
+    {{0,0,0,0,1,0,0,0,0,0}},
+    {{0,0,0,0,1,0,0,0,0,0}},
+    {{0,0,0,0,1,0,0,0,0,0}},
     {{0,0,1,1,0,0,0,0,0,0}},
     {{0,0,1,0,0,1,0,0,0,0}},
-    {{1,1,0,0,0,0,0,0,0,0}},
-    {{1,0,0,0,0,1,0,0,0,0}},
-    {{1,1,0,0,1,1,0,0,0,0}},
+    {{0,1,0,0,0,0,0,0,0,0}},
+    {{0,0,0,0,0,1,0,0,0,0}},
+    {{0,1,0,0,1,1,0,0,0,0}},
   }};
   Print(field);
   Print(Tetris::GetPlacements(field, 6));
-  Print(Tetris::GetMoveSequence(field, 6, 0, 5, 0, 17, 4, 0));
+  Print(Tetris::GetMoveSequence(field, 6, 0, 5, 0, 18, 0, 1));
 }
 
 #endif
