@@ -38,6 +38,12 @@ class Tetris {
     MoveSequence start, micro;
     bool use_micro; // if true, microadjustment is added and the final movements are overrided
   };
+  struct Position {
+    int rotate, x, y;
+    bool operator==(const Position& pos) const {
+      return rotate == pos.rotate && x == pos.x && y == pos.y;
+    }
+  };
 
  private:
   // # RNG
@@ -117,6 +123,8 @@ class Tetris {
   //   the target; after that, 3e-6 reward per point.
   // We use this to guide the agent toward the appropriate aggression to
   //   maximize the probability of reaching the point target.
+  static constexpr double kInvalidReward = -0.3;
+  // Provide a large reward deduction if the agent makes an invalid placement
   static constexpr double kInfeasibleReward = -0.2;
   // Provide a large reward deduction if the agent makes an infeasible placement
   // "Infeasible" placements are those cannot be done by +3σ tapping speeds
@@ -158,7 +166,8 @@ class Tetris {
   static constexpr int kNotGroundDelay_ = 2;
   static constexpr int kLineClearDelay_ = 20;
   // 1000 / (30 * 525 / 1.001 * 455 / 2 / 2 / (341 * 262 - 0.5) * 3)
-  static constexpr double kFrameLength = 655171. / 39375;
+  static constexpr double kFrameLength_ = 655171. / 39375;
+  static constexpr Position kStartPosition_ = {0, 0, 5}; // (r, x, y)
 
   void SpawnPiece_() {
     int next = std::discrete_distribution<int>(
@@ -167,20 +176,20 @@ class Tetris {
     next_piece_ = next;
   }
 
-  static bool IsGround_(int piece, int x, int rotate) {
-    auto& pl = kBlocks_[piece][rotate];
+  static bool IsGround_(int piece, const Position& pos) {
+    auto& pl = kBlocks_[piece][pos.rotate];
     for (auto& i : pl) {
-      if (x + i.first == kN - 1) return true;
+      if (pos.x + i.first == kN - 1) return true;
     }
     return false;
   }
 
-  static double GetDropTime_(int piece, int x, int rotate, int level,
+  static double GetDropTime_(int piece, const Position& pos, int level,
                              bool clear) {
-    return (x + 1 + kBaseDelay_ +
-            (IsGround_(piece, x, rotate) ? 0 : kNotGroundDelay_) +
+    return (pos.x + 1 + kBaseDelay_ +
+            (IsGround_(piece, pos) ? 0 : kNotGroundDelay_) +
             (clear ? kLineClearDelay_ : 0)) *
-           kFrameLength;
+           kFrameLength_;
   }
 
   template <class T>
@@ -227,9 +236,9 @@ class Tetris {
   };
 
   // Highest possible move
-  static Map_ Dijkstra_(const Map_& v, int cx, int cy, int rotate) {
+  static Map_ Dijkstra_(const Map_& v, const Position& start) {
     const int R = v.size();
-    ++cx, ++cy; // start
+    int cx = start.x + 1, cy = start.y + 1, rotate = start.rotate;
     Map_ ret(R, Map_::value_type{});
     if (!v[rotate][cx][cy]) return ret;
     CMap_<Weight_> d(v.size());
@@ -267,10 +276,10 @@ class Tetris {
   }
 
   // Lowest possible move (constrained to a specific move sequence)
-  static Map_ Dijkstra_(const Map_& v, int cx, int cy, int rotate,
+  static Map_ Dijkstra_(const Map_& v, const Position& start,
                         const std::vector<std::pair<int, MoveType>>& moves) {
     const int R = v.size(), N = moves.size();
-    ++cx, ++cy; // start
+    int cx = start.x + 1, cy = start.y + 1, rotate = start.rotate;
     Map_ ret(R, Map_::value_type{});
     if (!v[rotate][cx][cy]) return ret;
     std::vector<CMap_<Weight_>> d(N + 1, CMap_<Weight_>(v.size()));
@@ -310,9 +319,9 @@ class Tetris {
   }
 
   static std::vector<std::pair<int, MoveType>> MovesFromMap_(
-      Map_&& mp, int x, int y, int r) {
+      Map_&& mp, const Position& pos) {
+    int x = pos.x + 1, y = pos.y + 1, r = pos.rotate;
     int R = mp.size();
-    ++x, ++y;
     std::vector<std::pair<int, MoveType>> ret;
     static constexpr MoveType lookup[] = {
       MoveType::kL, MoveType::kL, // not used
@@ -333,6 +342,29 @@ class Tetris {
     return ret;
   }
 
+  // # Placements
+
+  // The agent execution for each placement:
+  //   1. Environment input: The placement of the current piece (A)
+  //      Environment internal: simulate misdrops and compute the real placement
+  //        result (S) after trying to place the piece according to B' (previous
+  //        step) and A
+  //   2. Environment output:
+  //      - Reward: kInvalidReward [and return to step 1] <if invalid>
+  //                all rewards (including score, target, infeasible, misdrop,...) <otherwise>
+  //      - State: The board after placing the current piece by A (**without**
+  //          misdrops) with place_stage_ = true (A is also available)
+  //   3. Environment input: The planned placement of the next piece (B)
+  //      Environment internal: Store the planned placement as move sequence
+  //        to use at the next step (B')
+  //   4. Environment output:
+  //      - Reward: kInvalidReward [and return to step 3] <if invalid>
+  //                0 <otherwise>
+  //      - State: The board after placing A with possible misdrops (simulated
+  //          at step 2) with place_stage_ = false (B is also available)
+  //  Note: The first step would have empty planned placement and place_stage_ = false
+  bool place_stage_;
+  MoveSequence planned_seq_;
 
  public:
   Tetris(uint64_t seed = 0) : rng_(seed) {
@@ -368,10 +400,10 @@ class Tetris {
     target_ = target;
   }
 
-  static int PlaceField(Field& field, int piece, int cx, int cy, int rotate) {
-    auto& pl = kBlocks_[piece][rotate];
+  static int PlaceField(Field& field, int piece, const Position& pos) {
+    auto& pl = kBlocks_[piece][pos.rotate];
     for (auto& i : pl) {
-      int nx = cx + i.first, ny = cy + i.second;
+      int nx = pos.x + i.first, ny = pos.y + i.second;
       if (nx >= kN || ny >= kM || nx < 0 || ny < 0) continue;
       field[nx][ny] = true;
     }
@@ -390,20 +422,20 @@ class Tetris {
     return ans;
   }
 
-  /// For training
+  // # For training
 
-  /// For evaluating
+  // # For evaluating
   void SetNowPiece(int piece) { now_piece_ = piece; }
   void SetNextPiece(int piece) { next_piece_ = piece; }
 
 
 
-  // Helpers
+  // # Helpers
 
   using PlaceMap = std::vector<std::array<std::array<bool, kM>, kN>>;
 
   static PlaceMap GetPlacements(const Field& field, int piece) {
-    Map_ mp = Dijkstra_(GetMap_(field, piece), 0, 5, 0);
+    Map_ mp = Dijkstra_(GetMap_(field, piece), kStartPosition_);
     PlaceMap ret(mp.size(), PlaceMap::value_type{});
     for (size_t r = 0; r < mp.size(); r++) {
       for (size_t x = 0; x < kN; x++) {
@@ -415,24 +447,24 @@ class Tetris {
     return ret;
   }
 
-  static MoveSequence GetMoveSequence(
-      const Field& field, int piece, int start_x, int start_y, int start_rotate,
-      int end_x, int end_y, int end_rotate) {
+  static MoveSequence GetMoveSequence(const Field& field, int piece,
+                                      const Position& start,
+                                      const Position& end) {
     MoveSequence ret{};
-    if (start_x == end_x && start_y == end_y && start_rotate == end_rotate) {
+    if (start == end) {
       ret.valid = true;
       return ret;
     }
 
     Map_ mp = GetMap_(field, piece);
-    Map_ mp_lb = Dijkstra_(mp, start_x, start_y, start_rotate);
-    if (!mp_lb[end_rotate][end_x + 1][end_y + 1]) return ret; // impossible move
+    Map_ mp_lb = Dijkstra_(mp, start);
+    if (!mp_lb[end.rotate][end.x + 1][end.y + 1]) return ret; // impossible move
     std::vector<std::pair<int, MoveType>> lb =
-        MovesFromMap_(std::move(mp_lb), end_x, end_y, end_rotate);
+        MovesFromMap_(std::move(mp_lb), end);
     // Get upper bound using the sequence of lb
-    Map_ mp_rb = Dijkstra_(mp, start_x, start_y, start_rotate, lb);
+    Map_ mp_rb = Dijkstra_(mp, start, lb);
     std::vector<std::pair<int, MoveType>> rb =
-        MovesFromMap_(std::move(mp_rb), end_x, end_y, end_rotate);
+        MovesFromMap_(std::move(mp_rb), end);
     if (lb.size() != rb.size()) throw 1;
     for (size_t i = 0; i < lb.size(); i++) {
       if (lb[i].second != rb[i].second) throw 2L;
@@ -442,7 +474,6 @@ class Tetris {
     ret.valid = true;
     return ret;
   }
-
 };
 
 decltype(Tetris::kBlocks_) Tetris::kBlocks_ = {
@@ -466,6 +497,7 @@ decltype(Tetris::kBlocks_) Tetris::kBlocks_ = {
     {{{{0, -2}, {0, -1}, {0, 0}, {0, 1}}}, // I
      {{{-2, 0}, {-1, 0}, {0, 0}, {1, 0}}}}};
 decltype(Tetris::kTransitionProb_) Tetris::kTransitionProb_;
+decltype(Tetris::kStartPosition_) Tetris::kStartPosition_;
 
 #ifndef DEBUG
 
@@ -533,7 +565,7 @@ int main() {
   }};
   Print(field);
   Print(Tetris::GetPlacements(field, 0));
-  Print(Tetris::GetMoveSequence(field, 0, 0, 5, 0, 18, 3, 3));
+  Print(Tetris::GetMoveSequence(field, 0, {0, 0, 5}, {3, 18, 2}));
 }
 
 #endif
