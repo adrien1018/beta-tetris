@@ -945,6 +945,8 @@ class Tetris {
     return ans;
   }
 
+  bool IsOver() const { return game_over_; }
+
   State GetState() const {
     State ret{};
     // 0: field
@@ -1034,8 +1036,9 @@ class Tetris {
 
   double InputPlacement(const Position& pos, bool training = true) {
     if (game_over_) return 0;
+    bool orig_stage = place_stage_;
     double ret = InputPlacement_(pos);
-    if (training && !place_stage_) TrainingSetPlacement();
+    if (training && orig_stage && !place_stage_) TrainingSetPlacement();
     return ret;
   }
 
@@ -1260,6 +1263,8 @@ TETRIS_DEFINE_STATIC(kScoreBase_);
 
 #ifndef DEBUG
 
+#include <numpy/ndarrayobject.h>
+
 static void TetrisDealloc(Tetris* self) {
   self->~Tetris();
   Py_TYPE(self)->tp_free((PyObject*)self);
@@ -1274,19 +1279,50 @@ static PyObject* TetrisNew(PyTypeObject* type, PyObject* args, PyObject* kwds) {
 static int TetrisInit(Tetris* self, PyObject* args, PyObject* kwds) {
   static const char *kwlist[] = {"seed", nullptr};
   unsigned long long seed = 0;
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|K", (char**)kwlist, &seed)) return -1;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|K", (char**)kwlist, &seed)) {
+    return -1;
+  }
   new(self) Tetris(seed);
   return 0;
 }
 
-static PyObject* Tetris_ResetRandom(Tetris* self, PyObject *Py_UNUSED(ignored)) {
+static PyObject* Tetris_ResetRandom(Tetris* self, PyObject* Py_UNUSED(ignored)) {
   self->ResetRandom();
   Py_RETURN_NONE;
+}
+
+static PyObject* Tetris_IsOver(Tetris* self, PyObject* Py_UNUSED(ignored)) {
+  return PyBool_FromLong((long)self->IsOver());
+}
+
+static PyObject* Tetris_InputPlacement(Tetris* self, PyObject* args, PyObject* kwds) {
+  static const char *kwlist[] = {"rotate", "x", "y", "training", nullptr};
+  int rotate, x, y, training = 1;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "iii|p", (char**)kwlist, &rotate,
+                                   &x, &y, &training)) {
+    return nullptr;
+  }
+  double reward = self->InputPlacement({rotate, x, y}, training);
+  return PyFloat_FromDouble(reward);
+}
+
+static PyObject* Tetris_GetState(Tetris* self, PyObject* Py_UNUSED(ignored)) {
+  Tetris::State state = self->GetState();
+  npy_intp dims[] = {state.size(), Tetris::kN, Tetris::kM};
+  PyObject* ret = PyArray_SimpleNew(3, dims, NPY_FLOAT32);
+  memcpy(PyArray_DATA(ret), state.data(), sizeof(state));
+  return ret;
 }
 
 static PyMethodDef py_tetris_methods[] = {
     {"ResetRandom", (PyCFunction)Tetris_ResetRandom, METH_NOARGS,
      "Reset a game using random parameters"},
+    {"IsOver", (PyCFunction)Tetris_IsOver, METH_NOARGS,
+     "Check whether the game is over"},
+    {"InputPlacement", (PyCFunction)Tetris_InputPlacement,
+     METH_VARARGS | METH_KEYWORDS, "Input a placement and return the reward"},
+    {"GetState", (PyCFunction)Tetris_GetState, METH_NOARGS,
+     "Get state array"},
     {nullptr}};
 
 static PyTypeObject py_tetris_class = {PyVarObject_HEAD_INIT(NULL, 0)};
@@ -1306,6 +1342,8 @@ PyMODINIT_FUNC PyInit_tetris() {
   py_tetris_module.m_name = "tetris";
   py_tetris_module.m_doc = "Tetris module";
   py_tetris_module.m_size = -1;
+
+  import_array();
 
   if (PyType_Ready(&py_tetris_class) < 0) return nullptr;
   PyObject *m = PyModule_Create(&py_tetris_module);
