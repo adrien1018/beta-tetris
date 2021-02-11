@@ -99,9 +99,9 @@ class Tetris {
   //   (the multiplier will be multiplied with the base misdrop rate to get the
   //    actual misdrop rate):
   //   1. Missing L/R tap
-  static constexpr double kMissLRTapMultiplier_ = 0.5;
+  static constexpr double kMissLRTapMultiplier_ = 0.3;
   //   2. Missing A/B tap
-  static constexpr double kMissABTapMultiplier_ = 0.5;
+  static constexpr double kMissABTapMultiplier_ = 0.3;
   //   3. Miss tuck
   static constexpr double kMissTuckMultiplier_ = 1.0;
   //   4. Miss spin
@@ -344,6 +344,7 @@ class Tetris {
         case MoveType::kR: Relax(nd.r, nd.x, nd.y + 1, nd.n + 1, wp, 5); break;
       }
     }
+    ret[rotate][cx][cy] = 0;
     return ret;
   }
 
@@ -422,6 +423,7 @@ class Tetris {
 
   static MoveSequence GetMoveSequenceLb_(const Map_& mp_lb,
                                          const Position& end) {
+    if (!CheckMovePossible_(mp_lb, end)) return MoveSequence{};
     std::vector<std::pair<int, MoveType>> lb = MovesFromMap_(mp_lb, end);
     MoveSequence ret;
     for (size_t i = 0; i < lb.size(); i++) {
@@ -448,11 +450,12 @@ class Tetris {
   }
 
   static bool CheckMovePossible_(const Map_& mp, const Position& pos) {
-    return mp[pos.rotate][pos.x + 1][pos.y + 1];
+    return mp[pos.rotate][pos.x + 1][pos.y + 1] && !mp[pos.rotate][pos.x + 2][pos.y + 1];
   }
 
   void StoreMap_(bool use_temp) {
-    stored_mp_ = GetMap_(use_temp ? temp_field_ : field_, now_piece_);
+    stored_mp_ = use_temp ? GetMap_(temp_field_, next_piece_)
+                          : GetMap_(field_, now_piece_);
     stored_mp_lb_ = Dijkstra_(stored_mp_, kStartPosition_);
   }
 
@@ -506,17 +509,17 @@ class Tetris {
       const MoveSequence& seq, double hz, bool misdrop, bool quicktap,
       int frames_per_drop, int start_row = 0,
       const FrameSequence_& prev_input = FrameSequence_{}) {
-    const double start_delay = RealRand_(0, first_tap_max_)(rng_);
+    const double start_delay = misdrop ? RealRand_(0, first_tap_max_)(rng_) : 0;
     const double base_interval = 1000. / hz;
     const bool is_micro = !prev_input.seq.empty();
-    double prev_lr = -1000, prev_ab = -1000, prev = start_delay;
+    double prev_lr = -1000, prev_ab = -1000;
 
     for (size_t i = 0; i < prev_input.seq.size(); i++) {
       auto& input = prev_input.seq[i];
       if (input.a || input.b) prev_ab = i * kFrameLength_;
       if (input.l || input.r) prev_lr = i * kFrameLength_;
     }
-    prev = prev_input.seq.size() * kFrameLength_;
+    double prev = std::max(start_delay, prev_input.seq.size() * kFrameLength_);
 
     size_t second_lr = 0, last_lr = 0, lr_count = 0;
     size_t last_ab = 0, ab_count = 0;
@@ -550,7 +553,10 @@ class Tetris {
       for (size_t i = 0; i < seq.moves.size(); i++) {
         const auto& move = seq.moves[i];
         double lower = prev;
-        if (i > 0 && IsAB(move.type) && !IsAB(seq.moves[i - 1].type)) {
+        //Print(move); printf("%d\n", start_row);
+        if (!IsAB(move.type) && move.height_start == start_row) {
+          lower = start_delay;
+        } else if (i > 0 && !IsAB(move.type) && IsAB(seq.moves[i - 1].type)) {
           lower += kFrameLength_;
         }
         double prev_cat = IsAB(move.type) ? prev_ab : prev_lr;
@@ -578,6 +584,7 @@ class Tetris {
             }
           }
         }
+        //printf("%f|%f %f %f\n", start_delay, lower, frame_start, prev_cat + interval);
         double time = std::max(std::max(lower, frame_start), prev_cat + interval);
         (IsAB(move.type) ? prev_ab : prev_lr) = time;
         prev = time;
@@ -688,11 +695,11 @@ class Tetris {
 
   double InputPlacement_(const Position& pos) {
     if (place_stage_) { // step 3
-      MoveSequence seq = GetMoveSequence(temp_field_, now_piece_, kStartPosition_, pos);
-      if (!seq.valid) {
+      if (!CheckMovePossible_(stored_mp_lb_, pos)) {
         if (++consecutive_invalid_ == 3) game_over_ = true;
         return kInvalidReward_;
       }
+      MoveSequence seq = GetMoveSequence_(stored_mp_, stored_mp_lb_, kStartPosition_, pos);
       double reward = 0;
       planned_placement_ = pos;
       planned_seq_ = seq;
@@ -748,25 +755,37 @@ class Tetris {
         }
       }
       if (!flag) { // has micro
-        planned_fseq_.seq.resize(microadj_delay_);
-        Position pos_before_adj = Simulate_(stored_mp_, planned_fseq_, frames_per_drop, false);
-        Map_ tmp_mp = Dijkstra_(stored_mp_, pos_before_adj);
-        MoveSequence seq = GetMoveSequenceLb_(tmp_mp, pos);
-        fseq = SequenceToFrame_(seq, hz_avg_ + 3 * hz_dev_, false, false,
-                                frames_per_drop, pos_before_adj.x,
-                                planned_fseq_);
-        if (Simulate_(stored_mp_, fseq, frames_per_drop) != pos) {
-          reward += kInfeasibleReward_;
+        if (!prev_misdrop_) {
+          planned_fseq_.seq.resize(microadj_delay_);
+          Position pos_before_adj =
+              Simulate_(stored_mp_, planned_fseq_, frames_per_drop, false);
+          Map_ tmp_mp = Dijkstra_(stored_mp_, pos_before_adj);
+          MoveSequence seq = GetMoveSequenceLb_(tmp_mp, pos);
+          if (seq.valid) {
+            fseq = SequenceToFrame_(seq, hz_avg_ + 3 * hz_dev_, false, false,
+                                    frames_per_drop, pos_before_adj.x,
+                                    planned_fseq_);
+            if (Simulate_(stored_mp_, fseq, frames_per_drop) != pos) {
+              reward += kInfeasibleReward_;
+            }
+          } else {
+            reward += kInfeasibleReward_;
+          }
         }
-        fseq = SequenceToFrame_(planned_seq_, hz, true, planned_quicktap_, frames_per_drop);
+        fseq = SequenceToFrame_(planned_seq_, hz, true, planned_quicktap_,
+                                frames_per_drop);
         fseq.seq.resize(microadj_delay_);
-        pos_before_adj = Simulate_(stored_mp_, fseq, frames_per_drop, false);
-        seq = GetMoveSequence_(stored_mp_, Dijkstra_(stored_mp_, pos_before_adj), pos_before_adj, pos);
+        Position pos_before_adj =
+            Simulate_(stored_mp_, fseq, frames_per_drop, false);
+        MoveSequence seq =
+            GetMoveSequence_(stored_mp_, Dijkstra_(stored_mp_, pos_before_adj),
+                             pos_before_adj, pos);
         if (seq.valid) {
           fseq = SequenceToFrame_(seq, hz, true, false, frames_per_drop,
                                   pos_before_adj.x, fseq);
         }
       }
+      //Print(fseq);
       real_placement_ = Simulate_(stored_mp_, fseq, frames_per_drop);
       prev_misdrop_ = real_placement_ != pos;
       if (prev_misdrop_) reward += kMisdropReward_;
@@ -784,9 +803,9 @@ class Tetris {
     int orig_score = score_;
     int score_delta = GetScore_(real_lines, level);
     score_ += score_delta;
-    prev_drop_time_ = GetDropTime_(now_piece_, real_placement_, frames_per_drop, real_lines > 0);
+    prev_drop_time_ = GetDropTime_(now_piece_, real_placement_, frames_per_drop,
+                                   real_lines > 0);
     pieces_++;
-    SpawnPiece_();
     if (orig_score >= target_) {
       reward += (reward_multiplier_ * 0.5) * score_delta;
     } else if (score_ < target_) {
@@ -812,8 +831,10 @@ class Tetris {
     int level = GetLevel_(start_level_, lines_);
     lines_ += real_lines;
     score_ += GetScore_(real_lines, level);
+    SpawnPiece_();
     StoreMap_(false);
     game_over_ = MapEmpty_(stored_mp_);
+    if (lines_ >= 350) game_over_ = false; // prevent game going indefinitely
     real_placement_set_ = true;
     return true;
   }
@@ -823,11 +844,15 @@ class Tetris {
     ResetGame(18);
   }
 
-  void ResetGame(int start_level, double hz_avg = 10, double hz_dev = 0,
-                 bool das = true, double first_tap_max = 0,
-                 int microadj_delay = 25, double orig_misdrop_rate = 5e-3,
-                 double misdrop_param_time = 250,
-                 double misdrop_param_pow = 1.5, int target = 1000000,
+  void Reseed(uint64_t seed = 0) {
+    rng_.seed(seed);
+  }
+
+  void ResetGame(int start_level = 18, double hz_avg = 10, double hz_dev = 0,
+                 bool das = true, double first_tap_max = 30,
+                 int microadj_delay = 40, double orig_misdrop_rate = 5e-3,
+                 double misdrop_param_time = 400,
+                 double misdrop_param_pow = 1.0, int target = 1000000,
                  double reward_multiplier = 2e-6) {
     start_level_ = start_level;
     lines_ = 0;
@@ -837,6 +862,7 @@ class Tetris {
     game_over_ = false;
     SpawnPiece_();
     SpawnPiece_();
+    consecutive_invalid_ = 0;
     for (auto& i : field_) std::fill(i.begin(), i.end(), false);
     reward_multiplier_ = reward_multiplier;
     hz_avg_ = hz_avg;
@@ -855,10 +881,49 @@ class Tetris {
     place_stage_ = false;
     planned_seq_.valid = false;
     real_placement_set_ = false;
+    planned_quicktap_ = false;
     StoreMap_(false);
   }
 
-  static int PlaceField(Field& field, int piece, const Position& pos) {
+  void ResetRandom() {
+    using IntRand = std::uniform_int_distribution<int>;
+    using GammaRand = std::gamma_distribution<double>;
+    auto Padded = [&](auto&& dist, double uniform_ratio, double l, double r) {
+      if (RealRand_(0, 1)(rng_) < uniform_ratio) {
+        return RealRand_(l, r)(rng_);
+      } else {
+        double val = dist(rng_);
+        if (val < l) val = l;
+        if (val > r) val = r;
+        return val;
+      }
+    };
+    double s_param = RealRand_(0, 1)(rng_); // strength parameter
+    int start_level = IntRand(18, 19)(rng_);
+    bool das = false;
+    double hz_avg = Padded(NormalRand_(11 + 5 * s_param, 2), 0.2, 8, 15 + 15 * s_param);
+    double hz_dev = Padded(GammaRand(4, (hz_avg / (3 + s_param * 2)) * 0.1),
+                           0.4, 0, hz_avg / (3 + s_param * 2));
+    if (RealRand_(0, 1)(rng_) < 0.3) {
+      das = true;
+      hz_dev = 0;
+      if (RealRand_(0, 1)(rng_) < 0.8) hz_avg = 10;
+    }
+    double first_tap_max = Padded(NormalRand_(30 - s_param * 20, 4), 0.25, 0, 50 - s_param * 30);
+    int microadj_delay = Padded(NormalRand_(40 - s_param * 20, 5), 0.25, 0, 60 - s_param * 20);
+    double orig_misdrop_rate = RealRand_(0, 1)(rng_) < 0.1 ? 0 :
+        std::exp(Padded(NormalRand_(-3.5 - s_param, 1), 0.2, -6 - s_param * 4, -3 - s_param));
+    double misdrop_param_time = Padded(NormalRand_(400, 100) , 0.6, 200, 700);
+    double misdrop_param_pow = RealRand_(0.7, 1.8)(rng_);
+    int target = Padded(NormalRand_(1.05e+6, 1.5e+5), 0.4, 2e+5, 1.5e+6);
+    double reward_multiplier = RealRand_(0, 1)(rng_) < 0.1 ? 0 :
+        Padded(GammaRand(0.5, 5e-6), 0.1, 0, 2e-5);
+    ResetGame(start_level, hz_avg, hz_dev, das, first_tap_max, microadj_delay,
+              orig_misdrop_rate, misdrop_param_time, misdrop_param_pow, target,
+              reward_multiplier);
+  }
+
+  static int PlaceField(Field & field, int piece, const Position& pos) {
     auto& pl = kBlocks_[piece][pos.rotate];
     for (auto& i : pl) {
       int nx = pos.x + i.first, ny = pos.y + i.second;
@@ -880,7 +945,7 @@ class Tetris {
     return ans;
   }
 
-  State GetState() {
+  State GetState() const {
     State ret{};
     // 0: field
     // 1-4: planned_placement_ (place_stage_ = true: step 1's input)
@@ -897,18 +962,20 @@ class Tetris {
       for (int i = 0; i < kN; i++) {
         for (int j = 0; j < kM; j++) ret[0][i][j] = 1 - field_[i][j];
       }
-      ret[5 + planned_placement_.rotate][planned_placement_.x]
-         [planned_placement_.y] = 1;
+      if (planned_seq_.valid) {
+        ret[5 + planned_placement_.rotate][planned_placement_.x]
+          [planned_placement_.y] = 1;
+      }
     }
     for (size_t r = 0; r < stored_mp_.size(); r++) {
       for (int i = 0; i < kN; i++) {
-        for (int j = 0; j < kM; j++) ret[9 + r][i][j] = stored_mp_[r][i + 1][j + 1];
+        for (int j = 0; j < kM; j++) ret[9 + r][i][j] = stored_mp_[r][i + 1][j + 1] && !stored_mp_[r][i + 2][j + 1];
       }
     }
     // misc
     float* misc = (float*)ret[13].data();
     // 0-6: current
-    misc[0 + now_piece_] = 1;
+    misc[0 + (place_stage_ ? next_piece_ : now_piece_)] = 1;
     // 7-14: next / 7(if place_stage_)
     misc[place_stage_ ? 14 : 7 + next_piece_] = 1;
     // 15-16: start (18 or 19)
@@ -965,9 +1032,11 @@ class Tetris {
     return ret;
   }
 
-  double InputPlacement(const Position& pos) {
+  double InputPlacement(const Position& pos, bool training = true) {
     if (game_over_) return 0;
-    return InputPlacement_(pos);
+    double ret = InputPlacement_(pos);
+    if (training && !place_stage_) TrainingSetPlacement();
+    return ret;
   }
 
   bool TrainingSetPlacement() {
@@ -1046,9 +1115,9 @@ private:
     }
   }
   static void Print(const Map_& mp) {
-    for (size_t i = 0; i < Tetris::kN; i++) {
+    for (size_t i = 0; i < kN; i++) {
       for (size_t j = 0; j < mp.size(); j++) {
-        for (auto& k : mp[j][i]) printf("%d ", (int)k);
+        for (auto& k : mp[j][i+1]) printf("%d ", (int)k);
         putchar('|');
       }
       putchar('\n');
@@ -1083,7 +1152,7 @@ private:
   }
 
 public:
-  void PrintAllState_() const {
+  void PrintAllState() const {
     puts("Game:");
     printf("Start: %d, lines: %d, score: %d, pieces: %d\n",
         start_level_, lines_, score_, pieces_);
@@ -1104,17 +1173,59 @@ public:
     puts("Temp:");
     printf("Lines: %d, score: %d, field:\n", temp_lines_, temp_score_);
     Print(temp_field_);
-    puts("Stored map:");
-    Print(stored_mp_);
+    puts("Stored map lb:");
+    Print(stored_mp_lb_);
     printf("Consecutive invalid: %d\n", consecutive_invalid_);
     puts("Parameters:");
     printf("Target: %d, reward multiplier: %e\n", target_, reward_multiplier_);
     printf("Hz: avg %f dev %f, first tap max: %f, das: %d\n", hz_avg_, hz_dev_,
            first_tap_max_, das_);
     printf("Microadj delay: %d, misdrop rate: %e\n", microadj_delay_,
-           misdrop_param_time_);
+           orig_misdrop_rate_);
     printf("Misdrop param: time %f, pow %f\n", misdrop_param_time_,
            misdrop_param_pow_);
+    puts("");
+  }
+
+  void PrintState(bool field_only = false) const {
+    auto st = GetState();
+    constexpr char kType[] = "TJZOSLI";
+    printf("Now: %c, next: %c; Game over: %d\n", kType[now_piece_],
+           kType[next_piece_], (int)game_over_);
+    puts("Field:");
+    for (auto& i : st[0]) {
+      for (auto& j : i) printf("%d ", (int)(1 - j));
+      puts("");
+    }
+    if (field_only) return;
+    puts("Possible:");
+    for (size_t i = 0; i < kN; i++) {
+      for (size_t j = 0; j < 4; j++) {
+        for (auto& k : st[9+j][i]) printf("%d ", (int)k);
+        putchar('|');
+      }
+      putchar('\n');
+    }
+    puts("Planned:");
+    for (size_t i = 1; i <= 8; i++) {
+      for (size_t j = 0; j < kN; j++) {
+        for (size_t k = 0; k < kM; k++) {
+          if (st[i][j][k]) printf("%d %d %d\n", (int)i, (int)j, (int)k);
+        }
+      }
+    }
+    puts("Misc:");
+    float* misc = (float*)st[13].data();
+    for (int i = 0; i < 7; i++) printf("%d ", (int)misc[i]);
+    puts("");
+    for (int i = 7; i < 15; i++) printf("%d ", (int)misc[i]);
+    puts("");
+    for (int i = 15; i < 26; i++) printf("%f ", misc[i]);
+    puts("");
+    for (int i = 26; i < 73; i++) printf("%d ", (int)misc[i]);
+    puts("");
+    for (int i = 73; i < 83; i++) printf("%f ", misc[i]);
+    puts("");
   }
 #endif
 };
@@ -1139,16 +1250,97 @@ decltype(Tetris::kBlocks_) Tetris::kBlocks_ = {
      {{{-1, 0}, {0, 0}, {1, 0}, {1, 1}}}},
     {{{{0, -2}, {0, -1}, {0, 0}, {0, 1}}}, // I
      {{{-2, 0}, {-1, 0}, {0, 0}, {1, 0}}}}};
-decltype(Tetris::kTransitionProb_) Tetris::kTransitionProb_;
-decltype(Tetris::kStartPosition_) Tetris::kStartPosition_;
+#define TETRIS_DEFINE_STATIC(x) decltype(Tetris::x) Tetris::x
+TETRIS_DEFINE_STATIC(kTransitionProb_);
+TETRIS_DEFINE_STATIC(kStartPosition_);
+TETRIS_DEFINE_STATIC(kLinesBeforeLevelUp_);
+TETRIS_DEFINE_STATIC(kFramesPerDrop_);
+TETRIS_DEFINE_STATIC(kScoreBase_);
+#undef TETRIS_DEFINE_STATIC
 
 #ifndef DEBUG
 
-#else
+static void TetrisDealloc(Tetris* self) {
+  self->~Tetris();
+  Py_TYPE(self)->tp_free((PyObject*)self);
+}
 
+static PyObject* TetrisNew(PyTypeObject* type, PyObject* args, PyObject* kwds) {
+  Tetris* self = (Tetris*)type->tp_alloc(type, 0);
+  // leave initialization to __init__
+  return (PyObject*)self;
+}
+
+static int TetrisInit(Tetris* self, PyObject* args, PyObject* kwds) {
+  static const char *kwlist[] = {"seed", nullptr};
+  unsigned long long seed = 0;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|K", (char**)kwlist, &seed)) return -1;
+  new(self) Tetris(seed);
+  return 0;
+}
+
+static PyObject* Tetris_ResetRandom(Tetris* self, PyObject *Py_UNUSED(ignored)) {
+  self->ResetRandom();
+  Py_RETURN_NONE;
+}
+
+static PyMethodDef py_tetris_methods[] = {
+    {"ResetRandom", (PyCFunction)Tetris_ResetRandom, METH_NOARGS,
+     "Reset a game using random parameters"},
+    {nullptr}};
+
+static PyTypeObject py_tetris_class = {PyVarObject_HEAD_INIT(NULL, 0)};
+static PyModuleDef py_tetris_module = {PyModuleDef_HEAD_INIT};
+
+PyMODINIT_FUNC PyInit_tetris() {
+  py_tetris_class.tp_name = "tetris.Tetris";
+  py_tetris_class.tp_doc = "Tetris class";
+  py_tetris_class.tp_basicsize = sizeof(Tetris);
+  py_tetris_class.tp_itemsize = 0;
+  py_tetris_class.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
+  py_tetris_class.tp_new = TetrisNew;
+  py_tetris_class.tp_init = (initproc)TetrisInit;
+  py_tetris_class.tp_dealloc = (destructor)TetrisDealloc;
+  py_tetris_class.tp_methods = py_tetris_methods;
+
+  py_tetris_module.m_name = "tetris";
+  py_tetris_module.m_doc = "Tetris module";
+  py_tetris_module.m_size = -1;
+
+  if (PyType_Ready(&py_tetris_class) < 0) return nullptr;
+  PyObject *m = PyModule_Create(&py_tetris_module);
+  if (m == nullptr) return nullptr;
+  Py_INCREF(&py_tetris_class);
+  if (PyModule_AddObject(m, "Tetris", (PyObject*)&py_tetris_class) < 0) {
+    Py_DECREF(&py_tetris_class);
+    Py_DECREF(m);
+    return nullptr;
+  }
+  return m;
+}
+
+#else
 
 int main() {
   Tetris t;
+  char buf[12];
+  while (true) {
+    printf("Input>");
+    fflush(stdout);
+    if (scanf("%s", buf) == -1) break;
+    switch (buf[0]) {
+      case 'p': t.PrintAllState(); break;
+      case 'f': t.PrintState(true); break;
+      case 's': t.PrintState(); break;
+      case 'r': t.ResetRandom(); break;
+      case 'i': {
+        int r, x, y;
+        scanf("%d %d %d", &r, &x, &y);
+        printf("Reward: %f\n", t.InputPlacement({r, x, y}));
+        break;
+      }
+    }
+  }
 }
 
 #endif
