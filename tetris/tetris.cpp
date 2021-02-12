@@ -18,6 +18,10 @@
 #endif
 
 #ifdef DEBUG
+#define DEBUG_METHODS
+#endif
+
+#ifdef DEBUG_METHODS
 #include <cstdio>
 #endif
 
@@ -142,7 +146,7 @@ class Tetris {
   // Provide a large reward deduction if the agent makes an infeasible placement
   // "Infeasible" placements are those cannot be done by +3σ tapping speeds
   //   (750-in-1 chance) and without misdrop
-  static constexpr double kMisdropReward_ = -0.06;
+  static constexpr double kMisdropReward_ = -0.03;
   // Provide a small reward deduction each time the agent makes an misdrop;
   //   this can guide the agent to avoid high-risk movements
 
@@ -946,6 +950,8 @@ class Tetris {
   }
 
   bool IsOver() const { return game_over_; }
+  int GetScore() const { return score_; }
+  int GetLines() const { return lines_; }
 
   State GetState() const {
     State ret{};
@@ -1106,7 +1112,7 @@ class Tetris {
     return GetMoveSequence_(mp, mp_lb, start, end);
   }
 
-#ifdef DEBUG
+#ifdef DEBUG_METHODS
 private:
   static void Print(const Position& pos) {
     printf("(%d,%d,%d)", pos.rotate, pos.x, pos.y);
@@ -1263,6 +1269,7 @@ TETRIS_DEFINE_STATIC(kScoreBase_);
 
 #ifndef DEBUG
 
+#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 #include <numpy/ndarrayobject.h>
 
 static void TetrisDealloc(Tetris* self) {
@@ -1310,9 +1317,65 @@ static PyObject* Tetris_GetState(Tetris* self, PyObject* Py_UNUSED(ignored)) {
   Tetris::State state = self->GetState();
   npy_intp dims[] = {state.size(), Tetris::kN, Tetris::kM};
   PyObject* ret = PyArray_SimpleNew(3, dims, NPY_FLOAT32);
-  memcpy(PyArray_DATA(ret), state.data(), sizeof(state));
+  memcpy(PyArray_DATA((PyArrayObject*)ret), state.data(), sizeof(state));
   return ret;
 }
+
+static PyObject* Tetris_ResetGame(Tetris* self, PyObject* args, PyObject* kwds) {
+  static const char* kwlist[] = {
+      "start_level", "hz_avg", "hz_dev", "das", "first_tap_max",
+      "microadj_delay", "orig_misdrop_rate", "misdrop_param_time",
+      "misdrop_param_pow", "target", "reward_multiplier", nullptr
+  };
+  int start_level = 18;
+  double hz_avg = 10;
+  double hz_dev = 0;
+  int das = 1;
+  double first_tap_max = 30;
+  int microadj_delay = 40;
+  double orig_misdrop_rate = 5e-3;
+  double misdrop_param_time = 400;
+  double misdrop_param_pow = 1.0;
+  int target = 1000000;
+  double reward_multiplier = 2e-6;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|iddpdidddid", (char**)kwlist,
+        &start_level, &hz_avg, &hz_dev, &das, &first_tap_max, &microadj_delay,
+        &orig_misdrop_rate, &misdrop_param_time, &misdrop_param_pow, &target,
+        &reward_multiplier)) {
+    return nullptr;
+  }
+  self->ResetGame(start_level, hz_avg, hz_dev, das, first_tap_max,
+      microadj_delay, orig_misdrop_rate, misdrop_param_time, misdrop_param_pow,
+      target, reward_multiplier);
+  Py_RETURN_NONE;
+}
+
+static PyObject* Tetris_GetScore(Tetris* self, PyObject* Py_UNUSED(ignored)) {
+  return PyLong_FromLong(self->GetScore());
+}
+
+static PyObject* Tetris_GetLines(Tetris* self, PyObject* Py_UNUSED(ignored)) {
+  return PyLong_FromLong(self->GetLines());
+}
+
+#ifdef DEBUG_METHODS
+
+static PyObject* Tetris_PrintState(Tetris* self, PyObject* Py_UNUSED(ignored)) {
+  self->PrintState();
+  Py_RETURN_NONE;
+}
+
+static PyObject* Tetris_PrintField(Tetris* self, PyObject* Py_UNUSED(ignored)) {
+  self->PrintState(true);
+  Py_RETURN_NONE;
+}
+
+static PyObject* Tetris_PrintAllState(Tetris* self, PyObject* Py_UNUSED(ignored)) {
+  self->PrintAllState();
+  Py_RETURN_NONE;
+}
+
+#endif
 
 static PyMethodDef py_tetris_methods[] = {
     {"ResetRandom", (PyCFunction)Tetris_ResetRandom, METH_NOARGS,
@@ -1323,6 +1386,18 @@ static PyMethodDef py_tetris_methods[] = {
      METH_VARARGS | METH_KEYWORDS, "Input a placement and return the reward"},
     {"GetState", (PyCFunction)Tetris_GetState, METH_NOARGS,
      "Get state array"},
+    {"ResetGame", (PyCFunction)Tetris_ResetGame, METH_VARARGS | METH_KEYWORDS,
+     "Reset a game using given parameters"},
+    {"GetLines", (PyCFunction)Tetris_GetLines, METH_NOARGS, "Get lines"},
+    {"GetScore", (PyCFunction)Tetris_GetScore, METH_NOARGS, "Get score"},
+#ifdef DEBUG_METHODS
+    {"PrintState", (PyCFunction)Tetris_PrintState, METH_NOARGS,
+     "Print state array"},
+    {"PrintField", (PyCFunction)Tetris_PrintField, METH_NOARGS,
+     "Print current field"},
+    {"PrintAllState", (PyCFunction)Tetris_PrintAllState, METH_NOARGS,
+     "Print all internal state"},
+#endif
     {nullptr}};
 
 static PyTypeObject py_tetris_class = {PyVarObject_HEAD_INIT(NULL, 0)};

@@ -5,7 +5,7 @@ import numpy
 
 #args = ['-fsanitize=address', '-fsanitize=undefined']
 #args = ['-fsanitize=address', '-fsanitize=pointer-compare']
-args = []
+args = ['-DDEBUG_METHODS']
 
 name = 'tetris'
 module = Extension(name, sources = ['tetris.cpp'],
