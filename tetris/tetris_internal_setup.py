@@ -3,9 +3,8 @@
 from distutils.core import setup, Extension
 import numpy
 
-#args = ['-fsanitize=address', '-fsanitize=undefined']
-#args = ['-fsanitize=address', '-fsanitize=pointer-compare']
 args = ['-DDEBUG_METHODS']
+#args = ['-DDEBUG_METHODS', '-fsanitize=address', '-fsanitize=undefined']
 
 name = 'tetris'
 module = Extension(name, sources = ['tetris.cpp'],

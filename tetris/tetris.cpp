@@ -142,11 +142,11 @@ class Tetris {
   //   maximize the probability of reaching the point target.
   static constexpr double kInvalidReward_ = -0.3;
   // Provide a large reward deduction if the agent makes an invalid placement
-  static constexpr double kInfeasibleReward_ = -0.2;
+  static constexpr double kInfeasibleReward_ = -0.04;
   // Provide a large reward deduction if the agent makes an infeasible placement
   // "Infeasible" placements are those cannot be done by +3σ tapping speeds
   //   (750-in-1 chance) and without misdrop
-  static constexpr double kMisdropReward_ = -0.03;
+  static constexpr double kMisdropReward_ = -0.01;
   // Provide a small reward deduction each time the agent makes an misdrop;
   //   this can guide the agent to avoid high-risk movements
 
@@ -557,7 +557,6 @@ class Tetris {
       for (size_t i = 0; i < seq.moves.size(); i++) {
         const auto& move = seq.moves[i];
         double lower = prev;
-        //Print(move); printf("%d\n", start_row);
         if (!IsAB(move.type) && move.height_start == start_row) {
           lower = start_delay;
         } else if (i > 0 && !IsAB(move.type) && IsAB(seq.moves[i - 1].type)) {
@@ -823,6 +822,7 @@ class Tetris {
     place_stage_ = true;
     consecutive_invalid_ = 0;
     StoreMap_(true);
+    game_over_ = MapEmpty_(stored_mp_lb_);
     return reward;
   }
 
@@ -837,8 +837,8 @@ class Tetris {
     score_ += GetScore_(real_lines, level);
     SpawnPiece_();
     StoreMap_(false);
-    game_over_ = MapEmpty_(stored_mp_);
-    if (lines_ >= 350) game_over_ = false; // prevent game going indefinitely
+    game_over_ = MapEmpty_(stored_mp_lb_);
+    if (lines_ >= 350) game_over_ = true; // prevent game going indefinitely
     real_placement_set_ = true;
     return true;
   }
@@ -975,9 +975,12 @@ class Tetris {
           [planned_placement_.y] = 1;
       }
     }
-    for (size_t r = 0; r < stored_mp_.size(); r++) {
+    for (size_t r = 0; r < stored_mp_lb_.size(); r++) {
       for (int i = 0; i < kN; i++) {
-        for (int j = 0; j < kM; j++) ret[9 + r][i][j] = stored_mp_[r][i + 1][j + 1] && !stored_mp_[r][i + 2][j + 1];
+        for (int j = 0; j < kM; j++) {
+          ret[9 + r][i][j] = stored_mp_lb_[r][i + 1][j + 1] &&
+              !stored_mp_lb_[r][i + 2][j + 1];
+        }
       }
     }
     // misc
@@ -1043,6 +1046,9 @@ class Tetris {
   double InputPlacement(const Position& pos, bool training = true) {
     if (game_over_) return 0;
     bool orig_stage = place_stage_;
+    if (pos.rotate >= (int)stored_mp_lb_.size() || pos.x >= kN || pos.y >= kM) {
+      return kInvalidReward_;
+    }
     double ret = InputPlacement_(pos);
     if (training && orig_stage && !place_stage_) TrainingSetPlacement();
     return ret;
@@ -1194,6 +1200,7 @@ public:
     printf("Misdrop param: time %f, pow %f\n", misdrop_param_time_,
            misdrop_param_pow_);
     puts("");
+    fflush(stdout);
   }
 
   void PrintState(bool field_only = false) const {
@@ -1206,7 +1213,10 @@ public:
       for (auto& j : i) printf("%d ", (int)(1 - j));
       puts("");
     }
-    if (field_only) return;
+    if (field_only) {
+      fflush(stdout);
+      return;
+    }
     puts("Possible:");
     for (size_t i = 0; i < kN; i++) {
       for (size_t j = 0; j < 4; j++) {
@@ -1235,6 +1245,7 @@ public:
     puts("");
     for (int i = 73; i < 83; i++) printf("%f ", misc[i]);
     puts("");
+    fflush(stdout);
   }
 #endif
 };
@@ -1321,6 +1332,13 @@ static PyObject* Tetris_GetState(Tetris* self, PyObject* Py_UNUSED(ignored)) {
   return ret;
 }
 
+static PyObject* Tetris_StateShape(void*, PyObject* Py_UNUSED(ignored)) {
+  PyObject* dim1 = PyLong_FromLong(std::tuple_size<Tetris::State>::value);
+  PyObject* dim2 = PyLong_FromLong(Tetris::kN);
+  PyObject* dim3 = PyLong_FromLong(Tetris::kM);
+  return PyTuple_Pack(3, dim1, dim2, dim3);
+}
+
 static PyObject* Tetris_ResetGame(Tetris* self, PyObject* args, PyObject* kwds) {
   static const char* kwlist[] = {
       "start_level", "hz_avg", "hz_dev", "das", "first_tap_max",
@@ -1384,8 +1402,9 @@ static PyMethodDef py_tetris_methods[] = {
      "Check whether the game is over"},
     {"InputPlacement", (PyCFunction)Tetris_InputPlacement,
      METH_VARARGS | METH_KEYWORDS, "Input a placement and return the reward"},
-    {"GetState", (PyCFunction)Tetris_GetState, METH_NOARGS,
-     "Get state array"},
+    {"GetState", (PyCFunction)Tetris_GetState, METH_NOARGS, "Get state array"},
+    {"StateShape", (PyCFunction)Tetris_StateShape, METH_NOARGS | METH_STATIC,
+     "Get shape of state array (static)"},
     {"ResetGame", (PyCFunction)Tetris_ResetGame, METH_VARARGS | METH_KEYWORDS,
      "Reset a game using given parameters"},
     {"GetLines", (PyCFunction)Tetris_GetLines, METH_NOARGS, "Get lines"},

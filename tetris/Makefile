@@ -1,5 +1,6 @@
 all:
 	python tetris_internal_setup.py build_ext --inplace
+	chmod 755 *.so
 cpp: tetris
 
 tetris: tetris.cpp
