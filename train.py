@@ -26,7 +26,8 @@ class Main:
         # total number of samples for a single update
         self.envs = self.c.n_workers * self.c.env_per_worker
         self.batch_size = self.envs * self.c.worker_steps
-        assert (self.batch_size % self.c.mini_batch_size == 0)
+        assert (self.batch_size % (self.c.n_update_per_epoch * self.c.mini_batch_size) == 0)
+        self.update_batch_size = self.batch_size // self.c.n_update_per_epoch
 
         # #### Initialize
         self.total_games = 0
@@ -58,6 +59,7 @@ class Main:
         for i in self.workers: i.child.recv()
 
         self.obs = obs_to_torch(self.obs_np, device)
+        self.max_reward_avg = 0.
 
     def w_range(self, x): return slice(x * self.c.env_per_worker, (x + 1) * self.c.env_per_worker)
 
@@ -110,15 +112,20 @@ class Main:
                     tracker.add('length', info['length'])
             self.obs = obs_to_torch(self.obs_np, device)
 
-        tracker.add('games', self.total_games)
-        # do not give misdrop & infeasible rewards in the beginning of training
-        step = tracker.get_global_step()
-        if step < 2000:
-            neg = np.logical_and(-0.25 < self.rewards, self.rewards < 0)
-            if step < 1000:
-                self.rewards[neg] = 0
-            else:
-                self.rewards[neg] *= (step - 1000) / 1000
+        tracker.add('mil_games', self.total_games * 1e-6)
+        reward_max = self.rewards.max()
+        alpha = 0.5 if reward_max > self.max_reward_avg else 0.9
+        self.max_reward_avg = self.max_reward_avg * alpha + self.rewards.max() * (1-alpha)
+        # Amplify positive rewards in the beginning of training
+        if self.max_reward_avg < 1.:
+            mul = (1. / (self.max_reward_avg + 1e-7)) ** 0.75
+            self.rewards[self.rewards > 0] *= mul
+        else:
+            mul = 1
+        if mul < 10000: tracker.add('mul', mul)
+
+        negs = np.logical_and(-0.25 < self.rewards, self.rewards < 0)
+        self.rewards[negs] *= self.c.neg_reward_multiplier
 
         # calculate advantages
         advantages = self._calc_advantages(self.done, self.rewards, values)
@@ -166,19 +173,22 @@ class Main:
         for _ in range(self.c.epochs):
             # shuffle for each epoch
             indexes = torch.randperm(self.batch_size)
-            for start in range(0, self.batch_size, self.c.mini_batch_size):
+            for start in range(0, self.batch_size, self.update_batch_size):
                 # get mini batch
-                end = start + self.c.mini_batch_size
-                mini_batch_indexes = indexes[start:end]
-                mini_batch = {}
-                for k, v in samples.items():
-                    mini_batch[k] = v[mini_batch_indexes]
+                end = start + self.update_batch_size
                 # train
-                loss = self._calc_loss(clip_range = self.c.clipping_range,
-                                       samples = mini_batch)
-                # compute gradients
                 self.optimizer.zero_grad()
-                self.scaler.scale(loss).backward()
+                loss_mul = self.update_batch_size // self.c.mini_batch_size
+                for t_start in range(start, end, self.c.mini_batch_size):
+                    t_end = t_start + self.c.mini_batch_size
+                    mini_batch_indexes = indexes[t_start:t_end]
+                    mini_batch = {}
+                    for k, v in samples.items():
+                        mini_batch[k] = v[mini_batch_indexes]
+                    loss = self._calc_loss(clip_range = self.c.clipping_range,
+                                        samples = mini_batch) / loss_mul
+                    self.scaler.scale(loss).backward()
+                # compute gradients
                 self.scaler.unscale_(self.optimizer)
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm = 0.5)
                 torch.nn.utils.clip_grad_value_(self.model.parameters(), 32)

@@ -142,7 +142,7 @@ class Tetris {
   //   maximize the probability of reaching the point target.
   static constexpr double kInvalidReward_ = -0.3;
   // Provide a large reward deduction if the agent makes an invalid placement
-  static constexpr double kInfeasibleReward_ = -0.04;
+  static constexpr double kInfeasibleReward_ = -0.00;
   // Provide a large reward deduction if the agent makes an infeasible placement
   // "Infeasible" placements are those cannot be done by +3σ tapping speeds
   //   (750-in-1 chance) and without misdrop
@@ -921,7 +921,7 @@ class Tetris {
     double misdrop_param_pow = RealRand_(0.7, 1.8)(rng_);
     int target = Padded(NormalRand_(1.05e+6, 1.5e+5), 0.4, 2e+5, 1.5e+6);
     double reward_multiplier = RealRand_(0, 1)(rng_) < 0.1 ? 0 :
-        Padded(GammaRand(0.5, 5e-6), 0.1, 0, 2e-5);
+        Padded(GammaRand(0.5, 5e-6), 0.3, 0, 2e-5);
     ResetGame(start_level, hz_avg, hz_dev, das, first_tap_max, microadj_delay,
               orig_misdrop_rate, misdrop_param_time, misdrop_param_pow, target,
               reward_multiplier);

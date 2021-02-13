@@ -56,8 +56,8 @@ def worker_process(remote: connection.Connection, shms: list, idx: slice, seed: 
                 step, data = data
                 result = []
                 for i in range(num):
-                    if rands[i] < 0.005:
-                        print(i, data[i] // 200, data[i] // 10 % 20, data[i] % 10)
+                    if rands[i] < 0.002:
+                        print('Game', i, data[i] // 200, data[i] // 10 % 20, data[i] % 10)
                         games[i].env.PrintAllState()
                         print('', flush = True)
                     result.append(games[i].step(data[i]))
