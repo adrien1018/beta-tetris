@@ -1,3 +1,4 @@
+import math
 import torch, numpy as np
 from torch import nn
 from torch.distributions import Categorical
@@ -61,10 +62,7 @@ class Model(nn.Module):
         pi += obs[:,5:9].view(obs.shape[0], -1) * 2
 
         mp = obs[:,9:13].view(obs.shape[0], -1)
-        if self.training:
-            pi -= (1 - mp) * 30
-        else:
-            pi[mp == 0] = -30
+        pi[mp == 0] = -math.inf
         value = self.value(x).reshape(-1)
         pi_sample = Categorical(logits = torch.clamp(pi, -30, 30))
         return pi_sample, value

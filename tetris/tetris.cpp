@@ -921,7 +921,7 @@ class Tetris {
     double misdrop_param_pow = RealRand_(0.7, 1.8)(rng_);
     int target = Padded(NormalRand_(1.05e+6, 1.5e+5), 0.4, 2e+5, 1.5e+6);
     double reward_multiplier = RealRand_(0, 1)(rng_) < 0.1 ? 0 :
-        Padded(GammaRand(0.5, 5e-6), 0.3, 0, 2e-5);
+        Padded(GammaRand(0.5, 3e-6), 0.5, 0, 2e-5);
     ResetGame(start_level, hz_avg, hz_dev, das, first_tap_max, microadj_delay,
               orig_misdrop_rate, misdrop_param_time, misdrop_param_pow, target,
               reward_multiplier);

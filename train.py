@@ -113,8 +113,11 @@ class Main:
             self.obs = obs_to_torch(self.obs_np, device)
 
         tracker.add('mil_games', self.total_games * 1e-6)
+        negs = np.logical_and(-0.25 < self.rewards, self.rewards < 0)
+        self.rewards[negs] *= self.c.neg_reward_multiplier
+        self.rewards += 1e-4
         reward_max = self.rewards.max()
-        alpha = 0.5 if reward_max > self.max_reward_avg else 0.9
+        alpha = 0.7 if reward_max > self.max_reward_avg else 0.9
         self.max_reward_avg = self.max_reward_avg * alpha + self.rewards.max() * (1-alpha)
         # Amplify positive rewards in the beginning of training
         if self.max_reward_avg < 1.:
@@ -124,8 +127,6 @@ class Main:
             mul = 1
         if mul < 10000: tracker.add('mul', mul)
 
-        negs = np.logical_and(-0.25 < self.rewards, self.rewards < 0)
-        self.rewards[negs] *= self.c.neg_reward_multiplier
 
         # calculate advantages
         advantages = self._calc_advantages(self.done, self.rewards, values)
