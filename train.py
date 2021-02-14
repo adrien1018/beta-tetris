@@ -39,7 +39,7 @@ class Main:
         self.scaler = GradScaler()
         self.optimizer = optim.Adam(self.model.parameters(), lr = self.c.lr,
                 weight_decay = self.c.reg_l2,
-                eps = 1e-4)
+                eps = 1e-5)
 
         # initialize tensors for observations
         shapes = [(self.envs, *kTensorDim),
@@ -117,17 +117,11 @@ class Main:
         tracker.add('mil_games', self.total_games * 1e-6)
         negs = np.logical_and(-0.25 < self.rewards, self.rewards < 0)
         self.rewards[negs] *= self.c.neg_reward_multiplier
-        self.rewards += 1e-4
+        self.rewards += np.random.random_sample(self.rewards.shape) * 1e-4
         reward_max = self.rewards.max()
         alpha = 0.7 if reward_max > self.max_reward_avg else 0.9
         self.max_reward_avg = self.max_reward_avg * alpha + self.rewards.max() * (1-alpha)
-        # Amplify positive rewards in the beginning of training
-        if self.max_reward_avg < 1.:
-            mul = (1. / (self.max_reward_avg + 1e-7)) ** 0.75
-            # self.rewards[self.rewards > 0] *= mul
-        else:
-            mul = 1
-        if mul < 10000: tracker.add('mul', mul)
+        tracker.add('mul', self.max_reward_avg / 1e-4)
 
 
         # calculate advantages
@@ -194,7 +188,7 @@ class Main:
                 # compute gradients
                 self.scaler.unscale_(self.optimizer)
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm = 0.5)
-                torch.nn.utils.clip_grad_value_(self.model.parameters(), 8)
+                torch.nn.utils.clip_grad_value_(self.model.parameters(), 16)
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
 
