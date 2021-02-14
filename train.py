@@ -117,7 +117,7 @@ class Main:
         tracker.add('mil_games', self.total_games * 1e-6)
         negs = np.logical_and(-0.25 < self.rewards, self.rewards < 0)
         self.rewards[negs] *= self.c.neg_reward_multiplier
-        self.rewards += np.random.random_sample(self.rewards.shape) * 1e-4
+        self.rewards += 1e-4
         reward_max = self.rewards.max()
         alpha = 0.7 if reward_max > self.max_reward_avg else 0.9
         self.max_reward_avg = self.max_reward_avg * alpha + self.rewards.max() * (1-alpha)
@@ -195,7 +195,7 @@ class Main:
     @staticmethod
     def _normalize(adv: torch.Tensor):
         """#### Normalize advantage function"""
-        return (adv - adv.mean()) / (adv.std() + 1e-4)
+        return (adv - adv.mean()) / (adv.std() + 1e-8)
 
     def _calc_loss(self, samples: Dict[str, torch.Tensor], clip_range: float) -> torch.Tensor:
         """## PPO Loss"""
