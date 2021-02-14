@@ -37,7 +37,9 @@ class Main:
 
         # optimizer
         self.scaler = GradScaler()
-        self.optimizer = optim.Adam(self.model.parameters(), lr = self.c.lr, weight_decay = self.c.reg_l2)
+        self.optimizer = optim.Adam(self.model.parameters(), lr = self.c.lr,
+                weight_decay = self.c.reg_l2,
+                eps = 1e-4)
 
         # initialize tensors for observations
         shapes = [(self.envs, *kTensorDim),
@@ -80,8 +82,8 @@ class Main:
         """### Sample data with current policy"""
         actions = torch.zeros((self.envs, self.c.worker_steps), dtype = torch.int32, device = device)
         obs = torch.zeros((self.envs, self.c.worker_steps, *kTensorDim), dtype = torch.uint8, device = device)
-        log_pis = torch.zeros((self.envs, self.c.worker_steps), dtype = torch.float16, device = device)
-        values = torch.zeros((self.envs, self.c.worker_steps), dtype = torch.float16, device = device)
+        log_pis = torch.zeros((self.envs, self.c.worker_steps), dtype = torch.float32, device = device)
+        values = torch.zeros((self.envs, self.c.worker_steps), dtype = torch.float32, device = device)
 
         # sample `worker_steps` from each worker
         for t in range(self.c.worker_steps):
@@ -122,7 +124,7 @@ class Main:
         # Amplify positive rewards in the beginning of training
         if self.max_reward_avg < 1.:
             mul = (1. / (self.max_reward_avg + 1e-7)) ** 0.75
-            self.rewards[self.rewards > 0] *= mul
+            # self.rewards[self.rewards > 0] *= mul
         else:
             mul = 1
         if mul < 10000: tracker.add('mul', mul)
@@ -144,13 +146,13 @@ class Main:
 
     def _calc_advantages(self, done: np.ndarray, rewards: np.ndarray, values: torch.Tensor) -> torch.Tensor:
         """### Calculate advantages"""
-        with torch.no_grad(), autocast():
+        with torch.no_grad():
             rewards = torch.from_numpy(rewards).to(device)
             done = torch.from_numpy(done).to(device)
 
             # advantages table
-            advantages = torch.zeros((self.envs, self.c.worker_steps), dtype = torch.float16, device = device)
-            last_advantage = torch.zeros(self.envs, dtype = torch.float16, device = device)
+            advantages = torch.zeros((self.envs, self.c.worker_steps), dtype = torch.float32, device = device)
+            last_advantage = torch.zeros(self.envs, dtype = torch.float32, device = device)
 
             # $V(s_{t+1})$
             _, last_value = self.model(self.obs)
@@ -192,7 +194,7 @@ class Main:
                 # compute gradients
                 self.scaler.unscale_(self.optimizer)
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm = 0.5)
-                torch.nn.utils.clip_grad_value_(self.model.parameters(), 32)
+                torch.nn.utils.clip_grad_value_(self.model.parameters(), 8)
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
 

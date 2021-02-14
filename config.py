@@ -23,5 +23,5 @@ class Configs(BaseConfigs):
     clipping_range: float = 0.2
     vf_weight: float = 0.5
     entropy_weight: float = 1e-2
-    reg_l2: float = 0
+    reg_l2: float = 2e-5
     neg_reward_multiplier: float = 1

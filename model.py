@@ -38,8 +38,8 @@ class Model(nn.Module):
                 nn.BatchNorm2d(4),
                 nn.Flatten(),
                 nn.ReLU(True),
-                nn.Linear(4 * kH * kW, 4 * kH * kW)
                 )
+        self.pi_last = nn.Linear(4 * kH * kW, 4 * kH * kW)
         self.value = nn.Sequential(
                 nn.Conv2d(ch, 1, 1),
                 nn.BatchNorm2d(1),
@@ -47,8 +47,8 @@ class Model(nn.Module):
                 nn.ReLU(True),
                 nn.Linear(1 * kH * kW, 256),
                 nn.ReLU(True),
-                nn.Linear(256, 1)
                 )
+        self.value_last = nn.Linear(256, 1)
 
     @autocast()
     def forward(self, obs: torch.Tensor):
@@ -58,14 +58,16 @@ class Model(nn.Module):
         q[:,kOrd:] = misc.view(obs.shape[0], -1, 1, 1)
         x = self.start(q)
         x = self.res(x)
+        valid = obs[:,9:13].view(obs.shape[0], -1)
         pi = self.pi_logits_head(x)
-        pi += obs[:,5:9].view(obs.shape[0], -1) * 2
-
-        mp = obs[:,9:13].view(obs.shape[0], -1)
-        pi[mp == 0] = -math.inf
-        value = self.value(x).reshape(-1)
-        pi_sample = Categorical(logits = torch.clamp(pi, -30, 30))
-        return pi_sample, value
+        value = self.value(x)
+        with autocast(enabled = False):
+            pi = self.pi_last(pi.float())
+            pi += obs[:,5:9].view(obs.shape[0], -1) * 2
+            pi[valid == 0] = -math.inf
+            value = self.value_last(value.float()).reshape(-1)
+            pi_sample = Categorical(logits = pi)
+            return pi_sample, value
 
 def obs_to_torch(obs: np.ndarray, device) -> torch.Tensor:
     return torch.tensor(obs, dtype = torch.float32, device = device)
