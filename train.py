@@ -16,9 +16,11 @@ from labml import monit, tracker, logger, experiment
 from game import Worker, kTensorDim
 from model import Model, obs_to_torch
 from config import Configs
+from saver import TorchSaver
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 #device = 'cpu'
+
 
 class Main:
     def __init__(self, c: Configs):
@@ -101,7 +103,7 @@ class Main:
             # run sampled actions on each worker
             # workers will place results in self.obs_np,rewards,done
             for w, worker in enumerate(self.workers):
-                worker.child.send(('step', (t, actions_cpu[self.w_range(w)])))
+                worker.child.send(('step', (t, actions_cpu[self.w_range(w)], tracker.get_global_step())))
             for i in self.workers:
                 info_arr = i.child.recv()
                 # collect episode info, which is available if an episode finished
@@ -230,6 +232,7 @@ class Main:
                 min = -clip_range, max = clip_range)
         vf_loss = torch.max((value - sampled_return) ** 2, (clipped_value - sampled_return) ** 2)
         vf_loss = 0.5 * vf_loss.mean()
+
         # we want to maximize $\mathcal{L}^{CLIP+VF+EB}(\theta)$
         # so we take the negative of it as the loss
         loss = -(policy_reward - self.c.vf_weight * vf_loss + self.c.entropy_weight * entropy_bonus)
@@ -285,7 +288,11 @@ if __name__ == "__main__":
     conf = Configs()
     experiment.configs(conf, override_dict)
     m = Main(conf)
-    experiment.add_pytorch_models({'model': m.model})
+    experiment.add_model_savers({
+            'model': TorchSaver('model', m.model),
+            'scaler': TorchSaver('scaler', m.scaler),
+            'optimizer': TorchSaver('optimizer', m.optimizer),
+        })
     if len(args['uuid']): experiment.load(args['uuid'], args['checkpoint'])
     with experiment.start():
         try: m.run_training_loop()
