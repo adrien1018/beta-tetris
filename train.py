@@ -80,7 +80,7 @@ class Main:
     def sample(self) -> (Dict[str, np.ndarray], List):
         """### Sample data with current policy"""
         actions = torch.zeros((self.envs, self.c.worker_steps), dtype = torch.int32, device = device)
-        obs = torch.zeros((self.envs, self.c.worker_steps, *kTensorDim), dtype = torch.uint8, device = device)
+        obs = torch.zeros((self.envs, self.c.worker_steps, *kTensorDim), dtype = torch.float32, device = device)
         log_pis = torch.zeros((self.envs, self.c.worker_steps), dtype = torch.float32, device = device)
         values = torch.zeros((self.envs, self.c.worker_steps), dtype = torch.float32, device = device)
 

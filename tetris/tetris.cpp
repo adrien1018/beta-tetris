@@ -919,7 +919,7 @@ class Tetris {
     double first_tap_max = Padded(NormalRand_(30 - s_param * 20, 4), 0.25, 0, 50 - s_param * 30);
     int microadj_delay = Padded(NormalRand_(40 - s_param * 20, 5), 0.25, 0, 60 - s_param * 20);
     double orig_misdrop_rate = RealRand_(0, 1)(rng_) < 0.1 ? 0 :
-        std::exp(Padded(NormalRand_(-3.5 - s_param, 1), 0.2, -6 - s_param * 4, -3 - s_param));
+        std::exp(Padded(NormalRand_(-4.5 - s_param, 1), 0.2, -6 - s_param * 4, -3 - s_param));
     double misdrop_param_time = Padded(NormalRand_(400, 100) , 0.6, 200, 700);
     double misdrop_param_pow = RealRand_(0.7, 1.8)(rng_);
     int target = Padded(NormalRand_(1.05e+6, 1.5e+5), 0.4, 2e+5, 1.5e+6);
@@ -932,7 +932,7 @@ class Tetris {
       }
       first_tap_max = 20;
       microadj_delay = 30;
-      orig_misdrop_rate = std::exp(-4);
+      orig_misdrop_rate = std::exp(-6);
       misdrop_param_time = 400;
       misdrop_param_pow = 1;
       reward_multiplier = 2e-5;
@@ -942,7 +942,7 @@ class Tetris {
               reward_multiplier);
   }
 
-  static int PlaceField(Field & field, int piece, const Position& pos) {
+  static int PlaceField(Field& field, int piece, const Position& pos) {
     auto& pl = kBlocks_[piece][pos.rotate];
     for (auto& i : pl) {
       int nx = pos.x + i.first, ny = pos.y + i.second;
@@ -1484,7 +1484,7 @@ int main() {
       case 'p': t.PrintAllState(); break;
       case 'f': t.PrintState(true); break;
       case 's': t.PrintState(); break;
-      case 'r': t.ResetRandom(); break;
+      case 'r': t.ResetRandom(0.5); break;
       case 'i': {
         int r, x, y;
         scanf("%d %d %d", &r, &x, &y);
