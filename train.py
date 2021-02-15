@@ -38,8 +38,7 @@ class Main:
         # optimizer
         self.scaler = GradScaler()
         self.optimizer = optim.Adam(self.model.parameters(), lr = self.c.lr,
-                weight_decay = self.c.reg_l2,
-                eps = 1e-5)
+                weight_decay = self.c.reg_l2)
 
         # initialize tensors for observations
         shapes = [(self.envs, *kTensorDim),
@@ -121,7 +120,7 @@ class Main:
         reward_max = self.rewards.max()
         alpha = 0.7 if reward_max > self.max_reward_avg else 0.9
         self.max_reward_avg = self.max_reward_avg * alpha + self.rewards.max() * (1-alpha)
-        tracker.add('mul', self.max_reward_avg / 1e-4)
+        tracker.add('mul', self.max_reward_avg / 2e-4)
 
 
         # calculate advantages
@@ -249,6 +248,7 @@ class Main:
         """### Run training loop"""
         offset = tracker.get_global_step()
         tracker.set_queue('score', 400, True)
+        tracker.set_queue('lines', 400, True)
         for _ in monit.loop(self.c.updates - offset):
             update = tracker.get_global_step()
             progress = update / self.c.updates
@@ -267,6 +267,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('name')
     parser.add_argument('uuid', nargs = '?', default = '')
+    parser.add_argument('checkpoint', nargs = '?', type = int, default = None)
     conf = Configs()
     keys = conf._to_json()
     for key in keys:
@@ -285,7 +286,7 @@ if __name__ == "__main__":
     experiment.configs(conf, override_dict)
     m = Main(conf)
     experiment.add_pytorch_models({'model': m.model})
-    if len(args['uuid']): experiment.load(args['uuid'])
+    if len(args['uuid']): experiment.load(args['uuid'], args['checkpoint'])
     with experiment.start():
         try: m.run_training_loop()
         except Exception as e: print(traceback.format_exc())

@@ -214,6 +214,10 @@ class Tetris {
     return kScoreBase_[lines] * (level + 1);
   }
 
+  static int GetFramesPerDrop_(int level) {
+    return level >= 29 ? 1 : kFramesPerDrop_[level];
+  }
+
   template <class T>
   using CMap_ = std::vector<std::array<std::array<T, kM + 2>, kN + 2>>;
   using Map_ = CMap_<uint8_t>;
@@ -587,7 +591,6 @@ class Tetris {
             }
           }
         }
-        //printf("%f|%f %f %f\n", start_delay, lower, frame_start, prev_cat + interval);
         double time = std::max(std::max(lower, frame_start), prev_cat + interval);
         (IsAB(move.type) ? prev_ab : prev_lr) = time;
         prev = time;
@@ -706,7 +709,7 @@ class Tetris {
       double reward = 0;
       planned_placement_ = pos;
       planned_seq_ = seq;
-      int frames_per_drop = kFramesPerDrop_[GetLevel_(start_level_, temp_lines_)];
+      int frames_per_drop = GetFramesPerDrop_(GetLevel_(start_level_, temp_lines_));
       planned_fseq_ = SequenceToFrame_(seq, hz_avg_ + hz_dev_ * 3, false, false,
                                        frames_per_drop);
       if (Simulate_(stored_mp_, planned_fseq_, frames_per_drop) != pos) {
@@ -733,7 +736,7 @@ class Tetris {
     }
     double reward = 0;
     int level = GetLevel_(start_level_, lines_);
-    int frames_per_drop = kFramesPerDrop_[level];
+    int frames_per_drop = GetFramesPerDrop_(level);
     if (!planned_seq_.valid) { // special case: first piece
       // Assume one won't misdrop on the first piece
       real_placement_ = pos;
@@ -920,7 +923,7 @@ class Tetris {
     double misdrop_param_time = Padded(NormalRand_(400, 100) , 0.6, 200, 700);
     double misdrop_param_pow = RealRand_(0.7, 1.8)(rng_);
     int target = Padded(NormalRand_(1.05e+6, 1.5e+5), 0.4, 2e+5, 1.5e+6);
-    double reward_multiplier = RealRand_(0, 1)(rng_) < 0.9 ? 1e-5 :
+    double reward_multiplier = RealRand_(0, 1)(rng_) < 0.9 ? 2e-5 :
         Padded(GammaRand(0.5, 3e-6), 0.3, 0, 2e-5);
     ResetGame(start_level, hz_avg, hz_dev, das, first_tap_max, microadj_delay,
               orig_misdrop_rate, misdrop_param_time, misdrop_param_pow, target,
@@ -1006,7 +1009,7 @@ class Tetris {
     // 22: pieces
     misc[22] = pieces_ * 2.5e-3;
     // 23-25: speed
-    misc[23 + (kFramesPerDrop_[level] - 1)] = 1;
+    misc[23 + (GetFramesPerDrop_(level) - 1)] = 1;
     // 26-73: lines to next speed
     //   26: level 29+
     //   27-36: 1-10
