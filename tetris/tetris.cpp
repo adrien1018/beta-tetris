@@ -892,7 +892,7 @@ class Tetris {
     StoreMap_(false);
   }
 
-  void ResetRandom() {
+  void ResetRandom(double fix_prob) {
     using IntRand = std::uniform_int_distribution<int>;
     using GammaRand = std::gamma_distribution<double>;
     auto Padded = [&](auto&& dist, double uniform_ratio, double l, double r) {
@@ -923,8 +923,20 @@ class Tetris {
     double misdrop_param_time = Padded(NormalRand_(400, 100) , 0.6, 200, 700);
     double misdrop_param_pow = RealRand_(0.7, 1.8)(rng_);
     int target = Padded(NormalRand_(1.05e+6, 1.5e+5), 0.4, 2e+5, 1.5e+6);
-    double reward_multiplier = RealRand_(0, 1)(rng_) < 0.9 ? 2e-5 :
+    double reward_multiplier = RealRand_(0, 1)(rng_) < 0.1 ? 0 :
         Padded(GammaRand(0.5, 3e-6), 0.3, 0, 2e-5);
+    if (RealRand_(0, 1)(rng_) < fix_prob) {
+      if (RealRand_(0, 1)(rng_) < 0.6) {
+        hz_avg = das ? 10 : 14;
+        hz_dev = das ? 0 : 1;
+      }
+      first_tap_max = 20;
+      microadj_delay = 30;
+      orig_misdrop_rate = std::exp(-4);
+      misdrop_param_time = 400;
+      misdrop_param_pow = 1;
+      reward_multiplier = 2e-5;
+    }
     ResetGame(start_level, hz_avg, hz_dev, das, first_tap_max, microadj_delay,
               orig_misdrop_rate, misdrop_param_time, misdrop_param_pow, target,
               reward_multiplier);
@@ -1307,8 +1319,13 @@ static int TetrisInit(Tetris* self, PyObject* args, PyObject* kwds) {
   return 0;
 }
 
-static PyObject* Tetris_ResetRandom(Tetris* self, PyObject* Py_UNUSED(ignored)) {
-  self->ResetRandom();
+static PyObject* Tetris_ResetRandom(Tetris* self, PyObject* args, PyObject* kwds) {
+  static const char *kwlist[] = {"fix_prob", nullptr};
+  double fix_prob = 0.9;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|d", (char**)kwlist, &fix_prob)) {
+    return nullptr;
+  }
+  self->ResetRandom(fix_prob);
   Py_RETURN_NONE;
 }
 
@@ -1399,7 +1416,7 @@ static PyObject* Tetris_PrintAllState(Tetris* self, PyObject* Py_UNUSED(ignored)
 #endif
 
 static PyMethodDef py_tetris_methods[] = {
-    {"ResetRandom", (PyCFunction)Tetris_ResetRandom, METH_NOARGS,
+    {"ResetRandom", (PyCFunction)Tetris_ResetRandom, METH_VARARGS | METH_KEYWORDS,
      "Reset a game using random parameters"},
     {"IsOver", (PyCFunction)Tetris_IsOver, METH_NOARGS,
      "Check whether the game is over"},
