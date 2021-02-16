@@ -118,12 +118,11 @@ class Main:
         tracker.add('mil_games', self.total_games * 1e-6)
         negs = np.logical_and(-0.25 < self.rewards, self.rewards < 0)
         self.rewards[negs] *= self.c.neg_reward_multiplier
-        self.rewards += 1e-4
-        reward_max = self.rewards.max()
-        alpha = 0.7 if reward_max > self.max_reward_avg else 0.9
+        self.rewards += 2e-5
+        reward_max = self.rewards[self.rewards < 1].max()
+        alpha = 0.9
         self.max_reward_avg = self.max_reward_avg * alpha + reward_max * (1-alpha)
-        tracker.add('mul', self.max_reward_avg)
-
+        tracker.add('max', self.max_reward_avg / 1e-4)
 
         # calculate advantages
         advantages = self._calc_advantages(self.done, self.rewards, values)

@@ -134,7 +134,7 @@ class Tetris {
   // Reward model
   int target_; // in points
   double reward_multiplier_;
-  static constexpr double kTargetReward_ = 100;
+  static constexpr double kTargetReward_ = 10;
   // The agent will get reward_multiplier_ reward per point before reaching the
   //   target, and get 100 reward immediately when reaching the target; after
   //   that, (reward_multiplier_ * 0.5) reward per point.
@@ -146,7 +146,7 @@ class Tetris {
   // Provide a large reward deduction if the agent makes an infeasible placement
   // "Infeasible" placements are those cannot be done by +3σ tapping speeds
   //   (750-in-1 chance) and without misdrop
-  static constexpr double kMisdropReward_ = -0.01;
+  static constexpr double kMisdropReward_ = -0.001;
   // Provide a small reward deduction each time the agent makes an misdrop;
   //   this can guide the agent to avoid high-risk movements
 
@@ -921,9 +921,9 @@ class Tetris {
         std::exp(Padded(NormalRand_(-4.5 - s_param, 1), 0.2, -6 - s_param * 4, -3 - s_param));
     double misdrop_param_time = Padded(NormalRand_(400, 100) , 0.6, 200, 700);
     double misdrop_param_pow = RealRand_(0.7, 1.8)(rng_);
-    int target = Padded(NormalRand_(1.05e+6, 1.5e+5), 0.4, 2e+5, 1.5e+6);
+    int target = Padded(NormalRand_(1.05e+6, 1.5e+5), 0.4, 1e+3, 1.5e+6);
     double reward_multiplier = RealRand_(0, 1)(rng_) < 0.1 ? 0 :
-        Padded(GammaRand(0.5, 3e-6), 0.3, 0, 2e-5);
+        Padded(GammaRand(0.5, 5e-7), 0.3, 0, 1e-5);
     if (RealRand_(0, 1)(rng_) < fix_prob) {
       if (RealRand_(0, 1)(rng_) < 0.6) {
         hz_avg = das ? 10 : 14;
@@ -931,10 +931,10 @@ class Tetris {
       }
       first_tap_max = 20;
       microadj_delay = 30;
-      orig_misdrop_rate = std::exp(-6);
+      orig_misdrop_rate = std::exp(-7);
       misdrop_param_time = 400;
       misdrop_param_pow = 1;
-      reward_multiplier = 2e-5;
+      reward_multiplier = 1e-5;
     }
     ResetGame(start_level, hz_avg, hz_dev, das, first_tap_max, microadj_delay,
               orig_misdrop_rate, misdrop_param_time, misdrop_param_pow, target,
