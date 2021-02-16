@@ -1030,7 +1030,7 @@ class Tetris {
     if (level >= 29) {
       misc[26] = 1;
     } else {
-      int lines_to_next = level == 19 ? 230 - lines : 130 - lines;
+      int lines_to_next = level == 18 ? 130 - lines : 230 - lines;
       if (lines_to_next <= 10) {
         misc[27 + (lines_to_next - 1)] = 1;
       } else if (lines_to_next <= 30) {
@@ -1253,11 +1253,18 @@ public:
     puts("");
     for (int i = 7; i < 15; i++) printf("%d ", (int)misc[i]);
     puts("");
-    for (int i = 15; i < 26; i++) printf("%f ", misc[i]);
+    printf("%6s %6s %6s %6s %6s %6s %6s %6s %6s %6s %6s\n",
+        "s19", "s18", "sc", "tg", "rmul", "lev", "ln", "pcs", "sp29", "sp19", "sp18");
+    for (int i = 15; i < 26; i++) printf("%6.3f ", misc[i]);
     puts("");
-    for (int i = 26; i < 73; i++) printf("%d ", (int)misc[i]);
+    constexpr int arr[] = {29,1,2,3,4,5,6,7,8,9,10,12,14,16,18,20,22,24,26,28,30,35,40,45,50,55,60,65,70,75,80,85,90,95,10,11,12,13,14,15,16,17,18,19,20,21,22,23};
+    for (int i = 0; i < 48; i++) printf("%2d", arr[i]);
     puts("");
-    for (int i = 73; i < 83; i++) printf("%f ", misc[i]);
+    for (int i = 26; i < 74; i++) printf("%d ", (int)misc[i]);
+    puts("");
+    printf("%6s %6s %6s %6s %6s %6s %6s %6s %6s\n",
+        "hzavg", "hzdev", "ftap", "das", "micdl", "misr", "mist", "misp", "prvmis");
+    for (int i = 74; i < 83; i++) printf("%6.3f ", misc[i]);
     puts("");
     fflush(stdout);
   }
