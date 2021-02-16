@@ -805,20 +805,19 @@ class Tetris {
     temp_score_ = score_ + GetScore_(planned_lines, level);
     Field field(field_);
     int real_lines = PlaceField(field, now_piece_, real_placement_);
-    lines_ += real_lines;
     int orig_score = score_;
     int score_delta = GetScore_(real_lines, level);
-    score_ += score_delta;
+    int new_score = score_ + score_delta;
     prev_drop_time_ = GetDropTime_(now_piece_, real_placement_, frames_per_drop,
                                    real_lines > 0);
     pieces_++;
     if (orig_score >= target_) {
       reward += (reward_multiplier_ * 0.5) * score_delta;
-    } else if (score_ < target_) {
+    } else if (new_score < target_) {
       reward += reward_multiplier_ * score_delta;
     } else {
       reward += reward_multiplier_ * (target_ - orig_score);
-      reward += (reward_multiplier_ * 0.5) * (score_ - target_);
+      reward += (reward_multiplier_ * 0.5) * (new_score - target_);
       reward += kTargetReward_;
     }
     real_placement_set_ = false;
@@ -1017,7 +1016,7 @@ class Tetris {
     int level = GetLevel_(start_level_, lines);
     misc[20] = level * 1e-1;
     // 21: lines
-    misc[21] = lines * 1e-2;
+    misc[21] = lines * 2e-2;
     // 22: pieces
     misc[22] = pieces_ * 2.5e-3;
     // 23-25: speed

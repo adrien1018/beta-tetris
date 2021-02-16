@@ -121,8 +121,8 @@ class Main:
         self.rewards += 1e-4
         reward_max = self.rewards.max()
         alpha = 0.7 if reward_max > self.max_reward_avg else 0.9
-        self.max_reward_avg = self.max_reward_avg * alpha + self.rewards.max() * (1-alpha)
-        tracker.add('mul', self.max_reward_avg / 2e-4)
+        self.max_reward_avg = self.max_reward_avg * alpha + reward_max * (1-alpha)
+        tracker.add('mul', self.max_reward_avg)
 
 
         # calculate advantages
@@ -262,7 +262,7 @@ class Main:
             # write summary info to the writer, and log to the screen
             tracker.save()
             if (update + 1) % 25 == 0: logger.log()
-            if (update + 1) % 500 == 0: experiment.save_checkpoint()
+            if (update + 1) % 200 == 0: experiment.save_checkpoint()
 
 import argparse
 
