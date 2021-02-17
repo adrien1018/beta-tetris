@@ -37,8 +37,8 @@ class Game:
         return self.env.GetState()
 
 def worker_process(remote: connection.Connection, shms: list, idx: slice, seed: int):
-    fp = open('logs/%d' % os.getpid(), 'w')
-    os.dup2(fp.fileno(), 1)
+    #fp = open('logs/%d' % os.getpid(), 'w')
+    #os.dup2(fp.fileno(), 1)
     shms = [(shared_memory.SharedMemory(name), shape, typ) for name, shape, typ in shms]
     shm_obs, shm_reward, shm_over = [
             np.ndarray(shape, dtype = typ, buffer = shm.buf) for shm, shape, typ in shms]
@@ -56,10 +56,10 @@ def worker_process(remote: connection.Connection, shms: list, idx: slice, seed: 
                 step, data, gb = data
                 result = []
                 for i in range(num):
-                    if rands[i] < 0.001:
-                        print(gb, 'Game', i, data[i] // 200, data[i] // 10 % 20, data[i] % 10)
-                        games[i].env.PrintAllState()
-                        print('', flush = True)
+                    #if rands[i] < 0.001:
+                    #    print(gb, 'Game', i, data[i] // 200, data[i] // 10 % 20, data[i] % 10)
+                    #    games[i].env.PrintAllState()
+                    #    print('', flush = True)
                     result.append(games[i].step(data[i]))
                     if result[-1][3] is not None:
                         rands[i] = random.random()

@@ -117,7 +117,7 @@ class Main:
 
         tracker.add('mil_games', self.total_games * 1e-6)
         negs = np.logical_and(-0.25 < self.rewards, self.rewards < 0)
-        self.rewards[negs] *= self.c.neg_reward_multiplier
+        self.rewards[negs] = 0
         self.rewards += 2e-5
         reward_max = self.rewards[self.rewards < 1].max()
         alpha = 0.9
@@ -167,6 +167,7 @@ class Main:
 
     def train(self, samples: Dict[str, torch.Tensor]):
         """### Train the model based on samples"""
+        self._preprocess_samples(samples)
         for _ in range(self.c.epochs):
             # shuffle for each epoch
             indexes = torch.randperm(self.batch_size)
@@ -197,11 +198,14 @@ class Main:
         """#### Normalize advantage function"""
         return (adv - adv.mean()) / (adv.std() + 1e-8)
 
+    @staticmethod
+    def _preprocess_samples(samples: Dict[str, torch.Tensor]):
+        # $R_t$ returns sampled from $\pi_{\theta_{OLD}}$
+        samples['returns'] = (samples['values'] + samples['advantages']).float()
+        samples['advantages'] = Main._normalize(samples['advantages'])
+
     def _calc_loss(self, samples: Dict[str, torch.Tensor], clip_range: float) -> torch.Tensor:
         """## PPO Loss"""
-        # $R_t$ returns sampled from $\pi_{\theta_{OLD}}$
-        sampled_return = (samples['values'] + samples['advantages']).float()
-        sampled_normalized_advantage = self._normalize(samples['advantages'])
         # Sampled observations are fed into the model to get $\pi_\theta(a_t|s_t)$ and $V^{\pi_\theta}(s_t)$;
         pi, value = self.model(samples['obs'])
 
@@ -216,8 +220,9 @@ class Main:
         #  but it reduces variance a lot.
         clipped_ratio = ratio.clamp(min = 1.0 - clip_range,
                                     max = 1.0 + clip_range)
-        policy_reward = torch.min(ratio * sampled_normalized_advantage,
-                                  clipped_ratio * sampled_normalized_advantage)
+        # advantages are normalized
+        policy_reward = torch.min(ratio * samples['advantages'],
+                                  clipped_ratio * samples['advantages'])
         policy_reward = policy_reward.mean()
 
         # #### Entropy Bonus
@@ -229,7 +234,8 @@ class Main:
         #  significantly from $V_{\theta_{OLD}}$.
         clipped_value = samples['values'] + (value - samples['values']).clamp(
                 min = -clip_range, max = clip_range)
-        vf_loss = torch.max((value - sampled_return) ** 2, (clipped_value - sampled_return) ** 2)
+        vf_loss = torch.max((value - samples['returns']) ** 2,
+                            (clipped_value - samples['returns']) ** 2)
         vf_loss = 0.5 * vf_loss.mean()
 
         # we want to maximize $\mathcal{L}^{CLIP+VF+EB}(\theta)$
