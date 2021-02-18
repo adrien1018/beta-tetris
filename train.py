@@ -79,7 +79,7 @@ class Main:
         self.rewards = None
         self.done = None
 
-    def sample(self) -> (Dict[str, np.ndarray], List):
+    def sample(self, train = True) -> (Dict[str, np.ndarray], List):
         """### Sample data with current policy"""
         actions = torch.zeros((self.envs, self.c.worker_steps), dtype = torch.int32, device = device)
         obs = torch.zeros((self.envs, self.c.worker_steps, *kTensorDim), dtype = torch.float32, device = device)
@@ -107,22 +107,27 @@ class Main:
             for i in self.workers:
                 info_arr = i.child.recv()
                 # collect episode info, which is available if an episode finished
-                self.total_games += len(info_arr)
-                for info in info_arr:
-                    tracker.add('reward', info['reward'])
-                    tracker.add('score', info['score'])
-                    tracker.add('lines', info['lines'])
-                    tracker.add('length', info['length'])
+                if train:
+                    self.total_games += len(info_arr)
+                    for info in info_arr:
+                        tracker.add('reward', info['reward'])
+                        tracker.add('score', info['score'])
+                        tracker.add('lines', info['lines'])
+                        tracker.add('length', info['length'])
             self.obs = obs_to_torch(self.obs_np, device)
 
-        tracker.add('mil_games', self.total_games * 1e-6)
+        # reshape rewards & log rewards
         negs = np.logical_and(-0.25 < self.rewards, self.rewards < 0)
         self.rewards[negs] = 0
         self.rewards += 2e-5
         reward_max = self.rewards[self.rewards < 1].max()
         alpha = 0.9
-        self.max_reward_avg = self.max_reward_avg * alpha + reward_max * (1-alpha)
-        tracker.add('max', self.max_reward_avg / 1e-4)
+        if train:
+            self.max_reward_avg = self.max_reward_avg * alpha + reward_max * (1-alpha)
+            tracker.add('max', self.max_reward_avg / 1e-4)
+            tracker.add('mil_games', self.total_games * 1e-6)
+        else:
+            self.max_reward_avg = reward_max
 
         # calculate advantages
         advantages = self._calc_advantages(self.done, self.rewards, values)
@@ -257,6 +262,9 @@ class Main:
         offset = tracker.get_global_step()
         tracker.set_queue('score', 400, True)
         tracker.set_queue('lines', 400, True)
+        if offset > 100:
+            # If resumed, sample several iterations first to reduce sampling bias
+            for i in range(16): self.sample(False)
         for _ in monit.loop(self.c.updates - offset):
             update = tracker.get_global_step()
             progress = update / self.c.updates
