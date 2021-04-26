@@ -15,7 +15,8 @@ class Game:
 
     def step(self, action):
         r, x, y = action // 200, action // 10 % 20, action % 10
-        reward = self.env.InputPlacement(r, x, y)
+        reward, reward_by_score = self.env.InputPlacement(r, x, y)
+        if y == 9: reward += reward_by_score * 0.1
         self.reward += reward
         self.length += 0.5
 

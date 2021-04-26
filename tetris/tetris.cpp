@@ -699,11 +699,11 @@ class Tetris {
     return true;
   }
 
-  double InputPlacement_(const Position& pos) {
+  std::pair<double, double> InputPlacement_(const Position& pos) {
     if (place_stage_) { // step 3
       if (!CheckMovePossible_(stored_mp_lb_, pos)) {
         if (++consecutive_invalid_ == 3) game_over_ = true;
-        return kInvalidReward_;
+        return {kInvalidReward_, 0};
       }
       MoveSequence seq = GetMoveSequence_(stored_mp_, stored_mp_lb_, kStartPosition_, pos);
       double reward = 0;
@@ -727,14 +727,15 @@ class Tetris {
       }
       place_stage_ = false;
       consecutive_invalid_ = 0;
-      return reward;
+      return {reward, 0};
     }
     // step 1
     if (!CheckMovePossible_(stored_mp_lb_, pos)) {
       if (++consecutive_invalid_ == 3) game_over_ = true;
-      return kInvalidReward_;
+      return {kInvalidReward_, 0};
     }
     double reward = 0;
+    double reward_by_score = 0;
     int level = GetLevel_(start_level_, lines_);
     int frames_per_drop = GetFramesPerDrop_(level);
     if (!planned_seq_.valid) { // special case: first piece
@@ -812,20 +813,21 @@ class Tetris {
                                    real_lines > 0);
     pieces_++;
     if (orig_score >= target_) {
-      reward += (reward_multiplier_ * 0.5) * score_delta;
+      reward_by_score += (reward_multiplier_ * 0.5) * score_delta;
     } else if (new_score < target_) {
-      reward += reward_multiplier_ * score_delta;
+      reward_by_score += reward_multiplier_ * score_delta;
     } else {
-      reward += reward_multiplier_ * (target_ - orig_score);
-      reward += (reward_multiplier_ * 0.5) * (new_score - target_);
+      reward_by_score += reward_multiplier_ * (target_ - orig_score);
+      reward_by_score += (reward_multiplier_ * 0.5) * (new_score - target_);
       reward += kTargetReward_;
     }
+    reward += reward_by_score;
     real_placement_set_ = false;
     place_stage_ = true;
     consecutive_invalid_ = 0;
     StoreMap_(true);
     game_over_ = MapEmpty_(stored_mp_lb_);
-    return reward;
+    return {reward, reward_by_score};
   }
 
   bool real_placement_set_;
@@ -1057,13 +1059,13 @@ class Tetris {
     return ret;
   }
 
-  double InputPlacement(const Position& pos, bool training = true) {
-    if (game_over_) return 0;
+  std::pair<double, double> InputPlacement(const Position& pos, bool training = true) {
+    if (game_over_) return {0, 0};
     bool orig_stage = place_stage_;
     if (pos.rotate >= (int)stored_mp_lb_.size() || pos.x >= kN || pos.y >= kM) {
-      return kInvalidReward_;
+      return {kInvalidReward_, 0};
     }
-    double ret = InputPlacement_(pos);
+    std::pair<double, double> ret = InputPlacement_(pos);
     if (training && orig_stage && !place_stage_) TrainingSetPlacement();
     return ret;
   }
@@ -1346,8 +1348,8 @@ static PyObject* Tetris_InputPlacement(Tetris* self, PyObject* args, PyObject* k
                                    &x, &y, &training)) {
     return nullptr;
   }
-  double reward = self->InputPlacement({rotate, x, y}, training);
-  return PyFloat_FromDouble(reward);
+  std::pair<double, double> reward = self->InputPlacement({rotate, x, y}, training);
+  return PyTuple_Pack(2, PyFloat_FromDouble(reward.first), PyFloat_FromDouble(reward.second));
 }
 
 static PyObject* Tetris_GetState(Tetris* self, PyObject* Py_UNUSED(ignored)) {
