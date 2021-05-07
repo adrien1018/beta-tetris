@@ -34,12 +34,12 @@ class Model(nn.Module):
                 )
         self.res = nn.Sequential(*[ConvBlock(ch) for i in range(blk)])
         self.pi_logits_head = nn.Sequential(
-                nn.Conv2d(ch, 4, 1),
-                nn.BatchNorm2d(4),
+                nn.Conv2d(ch, 8, 1),
+                nn.BatchNorm2d(8),
                 nn.Flatten(),
                 nn.ReLU(True),
                 )
-        self.pi_last = nn.Linear(4 * kH * kW, 4 * kH * kW)
+        self.pi_last = nn.Linear(8 * kH * kW, 4 * kH * kW)
         self.value = nn.Sequential(
                 nn.Conv2d(ch, 1, 1),
                 nn.BatchNorm2d(1),

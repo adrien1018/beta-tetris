@@ -18,14 +18,14 @@ class Configs(BaseConfigs):
     n_update_per_epoch: int = 32
     mini_batch_size: int = 512
     channels: int = 160
-    blocks: int = 6
+    blocks: int = 10
     lr: float = FloatDynamicHyperParam(1e-4, range_ = (0, 1e-3))
     clipping_range: float = 0.2
     vf_weight: float = 0.5
     entropy_weight: float = 1e-2
     reg_l2: float = FloatDynamicHyperParam(0., range_ = (0, 5e-5))
 
-    right_gain: float = FloatDynamicHyperParam(0.15, range_ = (0, 0.3))
+    right_gain: float = FloatDynamicHyperParam(0.2, range_ = (0, 0.3))
     fix_prob: float = FloatDynamicHyperParam(1., range_ = (0, 1))
     neg_mul: float = FloatDynamicHyperParam(0., range_ = (0, 1))
     step_reward: float = FloatDynamicHyperParam(2e-5, range_ = (0, 2e-5))
