@@ -71,7 +71,6 @@ class Main:
         for i in self.workers: i.child.recv()
 
         self.obs = obs_to_torch(self.obs_np, device)
-        self.max_reward_avg = 0.
 
     def set_optim(self, lr, reg_l2):
         if lr == self.cur_lr and reg_l2 == self.cur_reg_l2: return
@@ -134,7 +133,7 @@ class Main:
                     self.total_games += len(info_arr)
                     for info in info_arr:
                         tracker.add('reward', info['reward'])
-                        tracker.add('score', info['score'])
+                        tracker.add('scorek', info['score'] * 1e-3)
                         tracker.add('lines', info['lines'])
                         tracker.add('length', info['length'])
             self.obs = obs_to_torch(self.obs_np, device)
@@ -146,11 +145,8 @@ class Main:
         reward_max = self.rewards[self.rewards < 1].max()
         alpha = 0.9
         if train:
-            self.max_reward_avg = self.max_reward_avg * alpha + reward_max * (1-alpha)
-            tracker.add('max', self.max_reward_avg / 1e-4)
+            tracker.add('maxk', reward_max / 1e-2)
             tracker.add('mil_games', self.total_games * 1e-6)
-        else:
-            self.max_reward_avg = reward_max
 
         # calculate advantages
         advantages = self._calc_advantages(self.done, self.rewards, values)
