@@ -37,10 +37,15 @@ class Main:
         # model for sampling
         self.model = Model(c.channels, c.blocks).to(device)
 
+        # dynamic hyperparams
+        self.cur_lr = self.c.lr()
+        self.cur_reg_l2 = self.c.reg_l2()
+        self.cur_right_gain = 0.
+
         # optimizer
         self.scaler = GradScaler()
-        self.optimizer = optim.Adam(self.model.parameters(), lr = self.c.lr,
-                weight_decay = self.c.reg_l2)
+        self.optimizer = optim.Adam(self.model.parameters(), lr = self.cur_lr,
+                weight_decay = self.cur_reg_l2)
 
         # initialize tensors for observations
         shapes = [(self.envs, *kTensorDim),
@@ -60,9 +65,23 @@ class Main:
         self.workers = [Worker(shm, self.w_range(i), 27 + i) for i in range(self.c.n_workers)]
         for i in self.workers: i.child.send(('reset', None))
         for i in self.workers: i.child.recv()
+        self.set_right_gain(self.c.right_gain())
 
         self.obs = obs_to_torch(self.obs_np, device)
         self.max_reward_avg = 0.
+
+    def set_optim(self, lr, reg_l2):
+        if lr == self.cur_lr and reg_l2 == self.cur_reg_l2: return
+        for param_group in self.optimizer.param_groups:
+            param_group['lr'] = lr
+            param_group['weight_decay'] = reg_l2
+        self.cur_lr = lr
+        self.cur_reg_l2 = reg_l2
+
+    def set_right_gain(self, gain):
+        if gain == self.cur_right_gain: return
+        for i in self.workers: i.child.send(('set_right_gain', gain))
+        self.cur_right_gain = gain
 
     def w_range(self, x): return slice(x * self.c.env_per_worker, (x + 1) * self.c.env_per_worker)
 
@@ -274,6 +293,9 @@ class Main:
             self.train(samples)
             # write summary info to the writer, and log to the screen
             tracker.save()
+            if (update + 1) % 5 == 0:
+                self.set_optim(self.c.lr(), self.c.reg_l2())
+                self.set_right_gain(self.c.right_gain())
             if (update + 1) % 25 == 0: logger.log()
             if (update + 1) % 200 == 0: experiment.save_checkpoint()
 

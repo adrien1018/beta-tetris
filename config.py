@@ -1,4 +1,4 @@
-from labml.configs import BaseConfigs
+from labml.configs import BaseConfigs, FloatDynamicHyperParam
 
 class Configs(BaseConfigs):
     # #### Configurations
@@ -6,7 +6,7 @@ class Configs(BaseConfigs):
     gamma: float = 0.9994
     lamda: float = 0.95
     # number of updates
-    updates: int = 40000
+    updates: int = 100000
     # number of epochs to train the model with sampled data
     epochs: int = 1
     # number of worker processes
@@ -17,10 +17,12 @@ class Configs(BaseConfigs):
     # size of mini batches
     n_update_per_epoch: int = 32
     mini_batch_size: int = 512
-    channels: int = 128
-    blocks: int = 10
-    lr: float = 1e-4
+    channels: int = 160
+    blocks: int = 6
+    lr: float = FloatDynamicHyperParam(1e-4, range_ = (0, 1e-3))
     clipping_range: float = 0.2
     vf_weight: float = 0.5
     entropy_weight: float = 1e-2
-    reg_l2: float = 1e-5
+    reg_l2: float = FloatDynamicHyperParam(0., range_ = (0, 5e-5))
+
+    right_gain: float = FloatDynamicHyperParam(0.15, range_ = (0, 0.3))

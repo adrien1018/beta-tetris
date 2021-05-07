@@ -12,11 +12,12 @@ class Game:
         self.args = (0, False)
         self.env = tetris.Tetris(seed)
         self.reset()
+        self.right_gain = 0.
 
     def step(self, action):
         r, x, y = action // 200, action // 10 % 20, action % 10
         reward, reward_by_score = self.env.InputPlacement(r, x, y)
-        if y == 9: reward += reward_by_score * 0.1
+        if y == 9: reward += reward_by_score * self.right_gain
         self.reward += reward
         self.length += 0.5
 
@@ -81,6 +82,8 @@ def worker_process(remote: connection.Connection, shms: list, idx: slice, seed: 
                 remote.close()
                 for i in shms: i[0].close()
                 break
+            elif cmd == "set_right_gain":
+                for i in games: i.right_gain = float(data)
             else:
                 raise NotImplementedError
     except:
