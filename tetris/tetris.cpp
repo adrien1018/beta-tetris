@@ -1310,6 +1310,7 @@ decltype(Tetris::kBlocks_) Tetris::kBlocks_ = {
      {{{-1, 0}, {0, 0}, {1, 0}, {1, 1}}}},
     {{{{0, -2}, {0, -1}, {0, 0}, {0, 1}}}, // I
      {{{-2, 0}, {-1, 0}, {0, 0}, {1, 0}}}}};
+#ifndef _MSC_VER
 #define TETRIS_DEFINE_STATIC(x) decltype(Tetris::x) Tetris::x
 TETRIS_DEFINE_STATIC(kTransitionProb_);
 TETRIS_DEFINE_STATIC(kStartPosition_);
@@ -1317,6 +1318,7 @@ TETRIS_DEFINE_STATIC(kLinesBeforeLevelUp_);
 TETRIS_DEFINE_STATIC(kFramesPerDrop_);
 TETRIS_DEFINE_STATIC(kScoreBase_);
 #undef TETRIS_DEFINE_STATIC
+#endif
 
 #ifndef DEBUG
 
