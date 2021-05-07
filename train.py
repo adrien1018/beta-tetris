@@ -12,6 +12,7 @@ from torch import optim
 from torch.cuda.amp import autocast, GradScaler
 
 from labml import monit, tracker, logger, experiment
+from labml.configs import FloatDynamicHyperParam
 
 from game import Worker, kTensorDim
 from model import Model, obs_to_torch
@@ -310,12 +311,17 @@ if __name__ == "__main__":
     parser.add_argument('checkpoint', nargs = '?', type = int, default = None)
     conf = Configs()
     keys = conf._to_json()
+    dynamic_keys = set()
     for key in keys:
-        parser.add_argument('--' + key.replace('_', '-'), type = type(conf.__getattribute__(key)))
+        ptype = type(conf.__getattribute__(key))
+        if ptype == FloatDynamicHyperParam:
+            ptype = float
+            dynamic_keys.add(key)
+        parser.add_argument('--' + key.replace('_', '-'), type = ptype)
     args = vars(parser.parse_args())
     override_dict = {}
     for key in keys:
-        if args[key] is not None: override_dict[key] = args[key]
+        if key not in dynamic_keys and args[key] is not None: override_dict[key] = args[key]
     try:
         if len(args['name']) == 32:
             int(args['name'], 16)
@@ -323,6 +329,9 @@ if __name__ == "__main__":
     except ValueError: pass
     experiment.create(name = args['name'])
     conf = Configs()
+    for key in dynamic_keys:
+        if args[key] is not None:
+            conf.__getattribute__(key).set_value(args[key])
     experiment.configs(conf, override_dict)
     m = Main(conf)
     experiment.add_model_savers({
