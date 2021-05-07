@@ -41,6 +41,9 @@ class Main:
         self.cur_lr = self.c.lr()
         self.cur_reg_l2 = self.c.reg_l2()
         self.cur_right_gain = 0.
+        self.cur_fix_prob = 0.
+        self.cur_neg_mul = self.c.neg_mul()
+        self.cur_step_reward = self.c.step_reward()
 
         # optimizer
         self.scaler = GradScaler()
@@ -63,9 +66,9 @@ class Main:
         # create workers
         shm = [(shm.name, shape, typ) for shm, shape, typ in zip(self.shms, shapes, types)]
         self.workers = [Worker(shm, self.w_range(i), 27 + i) for i in range(self.c.n_workers)]
+        self.set_game_param(self.c.right_gain(), self.c.fix_prob())
         for i in self.workers: i.child.send(('reset', None))
         for i in self.workers: i.child.recv()
-        self.set_right_gain(self.c.right_gain())
 
         self.obs = obs_to_torch(self.obs_np, device)
         self.max_reward_avg = 0.
@@ -78,10 +81,11 @@ class Main:
         self.cur_lr = lr
         self.cur_reg_l2 = reg_l2
 
-    def set_right_gain(self, gain):
-        if gain == self.cur_right_gain: return
-        for i in self.workers: i.child.send(('set_right_gain', gain))
+    def set_game_param(self, gain, fix_prob):
+        if gain == self.cur_right_gain and fix_prob == self.cur_fix_prob: return
+        for i in self.workers: i.child.send(('set_param', (gain, fix_prob)))
         self.cur_right_gain = gain
+        self.cur_fix_prob = fix_prob
 
     def w_range(self, x): return slice(x * self.c.env_per_worker, (x + 1) * self.c.env_per_worker)
 
@@ -137,8 +141,8 @@ class Main:
 
         # reshape rewards & log rewards
         negs = np.logical_and(-0.25 < self.rewards, self.rewards < 0)
-        self.rewards[negs] = 0
-        self.rewards += 2e-5
+        self.rewards[negs] *= self.cur_neg_mul
+        self.rewards += self.cur_step_reward
         reward_max = self.rewards[self.rewards < 1].max()
         alpha = 0.9
         if train:
@@ -295,7 +299,9 @@ class Main:
             tracker.save()
             if (update + 1) % 5 == 0:
                 self.set_optim(self.c.lr(), self.c.reg_l2())
-                self.set_right_gain(self.c.right_gain())
+                self.set_game_param(self.c.right_gain(), self.c.fix_prob())
+                self.cur_neg_mul = self.c.neg_mul()
+                self.cur_step_reward = self.c.step_reward()
             if (update + 1) % 25 == 0: logger.log()
             if (update + 1) % 200 == 0: experiment.save_checkpoint()
 

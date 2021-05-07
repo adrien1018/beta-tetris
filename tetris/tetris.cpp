@@ -842,7 +842,8 @@ class Tetris {
     SpawnPiece_();
     StoreMap_(false);
     game_over_ = MapEmpty_(stored_mp_lb_);
-    if (lines_ >= 350) game_over_ = true; // prevent game going indefinitely
+    // prevent game going indefinitely (level 41, 120 lines after final transition)
+    if (lines_ >= 350) game_over_ = true;
     real_placement_set_ = true;
     return true;
   }
@@ -909,9 +910,10 @@ class Tetris {
     double s_param = RealRand_(0, 1)(rng_); // strength parameter
     int start_level = IntRand(18, 19)(rng_);
     bool das = false;
-    double hz_avg = Padded(NormalRand_(11 + 5 * s_param, 2), 0.2, 8, 15 + 15 * s_param);
-    double hz_dev = Padded(GammaRand(4, (hz_avg / (3 + s_param * 2)) * 0.1),
-                           0.4, 0, hz_avg / (3 + s_param * 2));
+    double hz_avg = Padded(NormalRand_(11 + 7 * s_param, 2), 0.3, 9, 15 + 15 * s_param);
+    double hz_dev = Padded(GammaRand(2.5, (hz_avg / (6 + s_param * 6)) * 0.125),
+                           0.1, 0, hz_avg / (6 + s_param * 6));
+    /*
     if (RealRand_(0, 1)(rng_) < 0.3) {
       das = true;
       hz_dev = 0;
@@ -937,6 +939,21 @@ class Tetris {
       misdrop_param_time = 400;
       misdrop_param_pow = 1;
       reward_multiplier = 1e-5;
+    }*/
+    double first_tap_max = 0;
+    int microadj_delay = Padded(NormalRand_(35 - s_param * 20, 5), 0.25, 0, 50 - s_param * 25);
+    double orig_misdrop_rate = 0;
+    double misdrop_param_time = 400; // arbitrary
+    double misdrop_param_pow = 1; // arbitrary
+    double reward_multiplier = RealRand_(0, 1)(rng_) < 0.2 ? 0 :
+        Padded(GammaRand(0.6, 2e-6), 0.3, 0, 1e-5);
+    int target = Padded(NormalRand_(1.1e+6, 1.5e+5), 0.2, 1e+3, 1.5e+6);
+    if (RealRand_(0, 1)(rng_) < fix_prob) {
+      if (RealRand_(0, 1)(rng_) < 0.8) hz_avg = 12;
+      if (RealRand_(0, 1)(rng_) < 0.8) target = IntRand(1000, 1400000)(rng_);
+      reward_multiplier = 1e-5;
+      hz_dev = 0;
+      microadj_delay = 25;
     }
     ResetGame(start_level, hz_avg, hz_dev, das, first_tap_max, microadj_delay,
               orig_misdrop_rate, misdrop_param_time, misdrop_param_pow, target,
@@ -1046,13 +1063,13 @@ class Tetris {
     // 74-78: hz_avg, hz_dev, first_tap_max, das, microadj_delay
     misc[74] = hz_avg_ / 5;
     misc[75] = hz_dev_ / 5;
-    misc[76] = first_tap_max_ * 1e-2;
-    misc[77] = das_;
+    misc[76] = first_tap_max_ * 1e-2; // currently constant
+    misc[77] = das_; //
     misc[78] = microadj_delay_ * 1e-1;
     // 79-81: orig_misdrop_rate, misdrop_param_time, misdrop_param_pow
-    misc[79] = std::max(-12., std::log(orig_misdrop_rate_ + 1e-12)) / 2;
-    misc[80] = misdrop_param_time_ * 1e-3;
-    misc[81] = misdrop_param_pow_;
+    misc[79] = std::max(-12., std::log(orig_misdrop_rate_ + 1e-12)) / 5; //
+    misc[80] = misdrop_param_time_ * 1e-3; //
+    misc[81] = misdrop_param_pow_; //
     // 82: prev_misdrop
     misc[82] = !place_stage_ && prev_misdrop_;
     // 13 + 83 = 96 (channels)
