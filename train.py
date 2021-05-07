@@ -41,10 +41,10 @@ class Main:
         # dynamic hyperparams
         self.cur_lr = self.c.lr()
         self.cur_reg_l2 = self.c.reg_l2()
+        self.cur_step_reward = 0.
         self.cur_right_gain = 0.
         self.cur_fix_prob = 0.
-        self.cur_neg_mul = self.c.neg_mul()
-        self.cur_step_reward = self.c.step_reward()
+        self.cur_neg_mul = 0.
 
         # optimizer
         self.scaler = GradScaler()
@@ -53,7 +53,7 @@ class Main:
 
         # initialize tensors for observations
         shapes = [(self.envs, *kTensorDim),
-                  (self.envs, self.c.worker_steps),
+                  (self.envs, self.c.worker_steps, 3),
                   (self.envs, self.c.worker_steps)]
         types = [np.dtype('float32'), np.dtype('float32'), np.dtype('bool')]
         self.shms = [
@@ -67,7 +67,7 @@ class Main:
         # create workers
         shm = [(shm.name, shape, typ) for shm, shape, typ in zip(self.shms, shapes, types)]
         self.workers = [Worker(shm, self.w_range(i), 27 + i) for i in range(self.c.n_workers)]
-        self.set_game_param(self.c.right_gain(), self.c.fix_prob())
+        self.set_game_param(self.c.right_gain(), self.c.fix_prob(), self.c.neg_mul(), self.c.step_reward())
         for i in self.workers: i.child.send(('reset', None))
         for i in self.workers: i.child.recv()
 
@@ -81,11 +81,15 @@ class Main:
         self.cur_lr = lr
         self.cur_reg_l2 = reg_l2
 
-    def set_game_param(self, gain, fix_prob):
-        if gain == self.cur_right_gain and fix_prob == self.cur_fix_prob: return
-        for i in self.workers: i.child.send(('set_param', (gain, fix_prob)))
+    def set_game_param(self, gain, fix_prob, neg_mul, step_reward):
+        if gain == self.cur_right_gain and fix_prob == self.cur_fix_prob and \
+                neg_mul == self.cur_neg_mul and step_reward == self.cur_step_reward:
+            return
+        for i in self.workers: i.child.send(('set_param', (gain, fix_prob, neg_mul, step_reward)))
         self.cur_right_gain = gain
         self.cur_fix_prob = fix_prob
+        self.cur_neg_mul = neg_mul
+        self.cur_step_reward = step_reward
 
     def w_range(self, x): return slice(x * self.c.env_per_worker, (x + 1) * self.c.env_per_worker)
 
@@ -107,7 +111,7 @@ class Main:
         actions = torch.zeros((self.envs, self.c.worker_steps), dtype = torch.int32, device = device)
         obs = torch.zeros((self.envs, self.c.worker_steps, *kTensorDim), dtype = torch.float32, device = device)
         log_pis = torch.zeros((self.envs, self.c.worker_steps), dtype = torch.float32, device = device)
-        values = torch.zeros((self.envs, self.c.worker_steps), dtype = torch.float32, device = device)
+        values = torch.zeros((self.envs, self.c.worker_steps, 3), dtype = torch.float32, device = device)
 
         # sample `worker_steps` from each worker
         for t in range(self.c.worker_steps):
@@ -140,11 +144,7 @@ class Main:
             self.obs = obs_to_torch(self.obs_np, device)
 
         # reshape rewards & log rewards
-        negs = np.logical_and(-0.25 < self.rewards, self.rewards < 0)
-        self.rewards[negs] *= self.cur_neg_mul
-        self.rewards += self.cur_step_reward
-        reward_max = self.rewards[self.rewards < 1].max()
-        alpha = 0.9
+        reward_max = self.rewards[:,:,0].max()
         if train:
             tracker.add('maxk', reward_max / 1e-2)
             tracker.add('mil_games', self.total_games * 1e-6)
@@ -170,15 +170,15 @@ class Main:
             done = torch.from_numpy(done).to(device)
 
             # advantages table
-            advantages = torch.zeros((self.envs, self.c.worker_steps), dtype = torch.float32, device = device)
-            last_advantage = torch.zeros(self.envs, dtype = torch.float32, device = device)
+            advantages = torch.zeros((self.envs, self.c.worker_steps, 3), dtype = torch.float32, device = device)
+            last_advantage = torch.zeros((self.envs, 3), dtype = torch.float32, device = device)
 
             # $V(s_{t+1})$
             _, last_value = self.model(self.obs)
 
             for t in reversed(range(self.c.worker_steps)):
                 # mask if episode completed after step $t$
-                mask = ~done[:, t]
+                mask = (~done[:, t]).unsqueeze(-1)
                 last_value = last_value * mask
                 last_advantage = last_advantage * mask
                 # $\delta_t$
@@ -226,8 +226,8 @@ class Main:
     @staticmethod
     def _preprocess_samples(samples: Dict[str, torch.Tensor]):
         # $R_t$ returns sampled from $\pi_{\theta_{OLD}}$
-        samples['returns'] = (samples['values'] + samples['advantages']).float()
-        samples['advantages'] = Main._normalize(samples['advantages'])
+        samples['returns'] = (samples['values'][:,:2] + samples['advantages'][:,:2]).float()
+        samples['advantages'] = Main._normalize(samples['advantages'][:,2])
 
     def _calc_loss(self, samples: Dict[str, torch.Tensor], clip_range: float) -> torch.Tensor:
         """## PPO Loss"""
@@ -257,11 +257,12 @@ class Main:
         # #### Value
         # Clipping makes sure the value function $V_\theta$ doesn't deviate
         #  significantly from $V_{\theta_{OLD}}$.
-        clipped_value = samples['values'] + (value - samples['values']).clamp(
+        clipped_value = samples['values'][:,:2] + (value[:,:2] - samples['values'][:,:2]).clamp(
                 min = -clip_range, max = clip_range)
-        vf_loss = torch.max((value - samples['returns']) ** 2,
+        vf_loss = torch.max((value[:,:2] - samples['returns']) ** 2,
                             (clipped_value - samples['returns']) ** 2)
-        vf_loss = 0.5 * vf_loss.mean()
+        vf_loss[:,1] *= self.c.target_prob_weight
+        vf_loss = 0.5 * vf_loss.sum(-1).mean()
 
         # we want to maximize $\mathcal{L}^{CLIP+VF+EB}(\theta)$
         # so we take the negative of it as the loss
@@ -271,7 +272,7 @@ class Main:
         approx_kl_divergence = .5 * ((samples['log_pis'] - log_pi) ** 2).mean()
         clip_fraction = (abs((ratio - 1.0)) > clip_range).to(torch.float).mean()
         tracker.add({'policy_reward': policy_reward,
-                     'vf_loss': vf_loss,
+                     'vf_loss': vf_loss ** 0.5,
                      'entropy_bonus': entropy_bonus,
                      'kl_div': approx_kl_divergence,
                      'clip_fraction': clip_fraction})
@@ -296,9 +297,7 @@ class Main:
             tracker.save()
             if (update + 1) % 5 == 0:
                 self.set_optim(self.c.lr(), self.c.reg_l2())
-                self.set_game_param(self.c.right_gain(), self.c.fix_prob())
-                self.cur_neg_mul = self.c.neg_mul()
-                self.cur_step_reward = self.c.step_reward()
+                self.set_game_param(self.c.right_gain(), self.c.fix_prob(), self.c.neg_mul(), self.c.step_reward())
             if (update + 1) % 25 == 0: logger.log()
             if (update + 1) % 200 == 0: experiment.save_checkpoint()
 

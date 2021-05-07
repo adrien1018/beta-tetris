@@ -13,12 +13,13 @@ class Game:
         self.env = tetris.Tetris(seed)
         self.right_gain = 0.
         self.fix_prob = 0.
+        self.penalty_multiplier = 0.
+        self.step_reward = 0.
         self.reset()
 
     def step(self, action):
         r, x, y = action // 200, action // 10 % 20, action % 10
-        reward, reward_by_score = self.env.InputPlacement(r, x, y)
-        if y == 9: reward += reward_by_score * self.right_gain
+        reward_score, reward, is_target = self.env.InputPlacement(r, x, y)
         self.reward += reward
         self.length += 0.5
 
@@ -31,12 +32,12 @@ class Game:
                     'length': self.length}
             is_over = True
             self.reset()
-        return self.env.GetState(), reward, is_over, info
+        return self.env.GetState(), np.array([reward_score, is_target, reward]), is_over, info
 
     def reset(self):
         self.reward = 0.
         self.length = 0.
-        self.env.ResetRandom(self.fix_prob)
+        self.env.ResetRandom(self.fix_prob, self.right_gain, self.penalty_multiplier, self.step_reward)
         return self.env.GetState()
 
 def worker_process(remote: connection.Connection, shms: list, idx: slice, seed: int):
@@ -84,10 +85,12 @@ def worker_process(remote: connection.Connection, shms: list, idx: slice, seed: 
                 for i in shms: i[0].close()
                 break
             elif cmd == "set_param":
-                gain, fix_prob = data
+                gain, fix_prob, penalty_mul, step_reward = data
                 for i in games:
-                    i.right_gain = float(gain)
-                    i.fix_prob = float(fix_prob)
+                    i.right_gain = gain
+                    i.fix_prob = fix_prob
+                    i.penalty_multiplier = penalty_mul
+                    i.step_reward = step_reward
             else:
                 raise NotImplementedError
     except:

@@ -23,6 +23,7 @@ class Configs(BaseConfigs):
     clipping_range: float = 0.2
     vf_weight: float = 0.5
     entropy_weight: float = 1e-2
+    target_prob_weight: float = 0.2
     reg_l2: float = FloatDynamicHyperParam(0., range_ = (0, 5e-5))
 
     right_gain: float = FloatDynamicHyperParam(0.2, range_ = (0, 0.3))

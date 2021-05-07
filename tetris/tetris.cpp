@@ -52,6 +52,10 @@ class Tetris {
     }
     bool operator!=(const Position& pos) const { return !(*this == pos); }
   };
+  struct Reward {
+    double score_reward, tot_reward;
+    bool target;
+  };
 
   using State = std::array<std::array<std::array<float, kM>, kN>, 14>;
 
@@ -134,21 +138,31 @@ class Tetris {
   // Reward model
   int target_; // in points
   double reward_multiplier_;
-  static constexpr double kTargetReward_ = 10;
+  static constexpr double kTargetRewardMultiplier_ = 5e-6;
+  // Update model.py if this multiplier changed
   // The agent will get reward_multiplier_ reward per point before reaching the
-  //   target, and get 100 reward immediately when reaching the target; after
+  //   target, and get 5e-6*target reward immediately when reaching the target; after
   //   that, (reward_multiplier_ * 0.5) reward per point.
   // We use this to guide the agent toward the appropriate aggression to
   //   maximize the probability of reaching the point target.
   static constexpr double kInvalidReward_ = -0.3;
   // Provide a large reward deduction if the agent makes an invalid placement
-  static constexpr double kInfeasibleReward_ = -0.00;
+  static constexpr double kInfeasibleReward_ = -0.002;
   // Provide a large reward deduction if the agent makes an infeasible placement
   // "Infeasible" placements are those cannot be done by +3σ tapping speeds
   //   (750-in-1 chance) and without misdrop
   static constexpr double kMisdropReward_ = -0.001;
   // Provide a small reward deduction each time the agent makes an misdrop;
   //   this can guide the agent to avoid high-risk movements
+  double right_gain_ = 0.2;
+  // Provide a reward gain to guide the agent to use right well strategy.
+  // This can be decreased during training.
+  double penalty_multiplier_ = 1.0;
+  // Multiplier of misdrop & infeasible penalty. Set to 0 in early training to
+  //   avoid misguiding the agent.
+  double step_reward_ = 2e-5;
+  // A very small reward given to every half-rounds. Used to guide the very
+  //   early stage of training.
 
   // # Game constants
   // Piece generation probabilities
@@ -699,11 +713,11 @@ class Tetris {
     return true;
   }
 
-  std::pair<double, double> InputPlacement_(const Position& pos) {
+  Reward InputPlacement_(const Position& pos) {
     if (place_stage_) { // step 3
       if (!CheckMovePossible_(stored_mp_lb_, pos)) {
         if (++consecutive_invalid_ == 3) game_over_ = true;
-        return {kInvalidReward_, 0};
+        return {0, kInvalidReward_, false};
       }
       MoveSequence seq = GetMoveSequence_(stored_mp_, stored_mp_lb_, kStartPosition_, pos);
       double reward = 0;
@@ -723,11 +737,12 @@ class Tetris {
           }
           planned_quicktap_ = flag;
         }
-        if (!flag) reward += kInfeasibleReward_;
+        if (!flag) reward += kInfeasibleReward_ * penalty_multiplier_;
       }
+      reward += step_reward_;
       place_stage_ = false;
       consecutive_invalid_ = 0;
-      return {reward, 0};
+      return {reward, reward, 0};
     }
     // step 1
     if (!CheckMovePossible_(stored_mp_lb_, pos)) {
@@ -735,7 +750,6 @@ class Tetris {
       return {kInvalidReward_, 0};
     }
     double reward = 0;
-    double reward_by_score = 0;
     int level = GetLevel_(start_level_, lines_);
     int frames_per_drop = GetFramesPerDrop_(level);
     if (!planned_seq_.valid) { // special case: first piece
@@ -773,10 +787,10 @@ class Tetris {
                                     frames_per_drop, pos_before_adj.x,
                                     planned_fseq_);
             if (Simulate_(stored_mp_, fseq, frames_per_drop) != pos) {
-              reward += kInfeasibleReward_;
+              reward += kInfeasibleReward_ * penalty_multiplier_;
             }
           } else {
-            reward += kInfeasibleReward_;
+            reward += kInfeasibleReward_ * penalty_multiplier_;
           }
         }
         fseq = SequenceToFrame_(planned_seq_, hz, true, planned_quicktap_,
@@ -795,7 +809,7 @@ class Tetris {
       //Print(fseq);
       real_placement_ = Simulate_(stored_mp_, fseq, frames_per_drop);
       prev_misdrop_ = real_placement_ != pos;
-      if (prev_misdrop_) reward += kMisdropReward_;
+      if (prev_misdrop_) reward += kMisdropReward_ * penalty_multiplier_;
       prev_micro_ = !flag;
       das_charged_ = fseq.is_charged;
     }
@@ -812,22 +826,27 @@ class Tetris {
     prev_drop_time_ = GetDropTime_(now_piece_, real_placement_, frames_per_drop,
                                    real_lines > 0);
     pieces_++;
+    double score_reward = 0;
+    bool is_target = false;
+    double target_reward = 0;
     if (orig_score >= target_) {
-      reward_by_score += (reward_multiplier_ * 0.5) * score_delta;
+      score_reward = (reward_multiplier_ * 0.5) * score_delta;
     } else if (new_score < target_) {
-      reward_by_score += reward_multiplier_ * score_delta;
+      score_reward = reward_multiplier_ * score_delta;
     } else {
-      reward_by_score += reward_multiplier_ * (target_ - orig_score);
-      reward_by_score += (reward_multiplier_ * 0.5) * (new_score - target_);
-      reward += kTargetReward_;
+      score_reward = reward_multiplier_ * (target_ - orig_score);
+      score_reward += (reward_multiplier_ * 0.5) * (new_score - target_);
+      is_target = true;
+      target_reward = target_ * kTargetRewardMultiplier_;
     }
-    reward += reward_by_score;
+    if (pos.y == 9) score_reward *= 1 + right_gain_;
+    reward += score_reward + step_reward_;
     real_placement_set_ = false;
     place_stage_ = true;
     consecutive_invalid_ = 0;
     StoreMap_(true);
     game_over_ = MapEmpty_(stored_mp_lb_);
-    return {reward, reward_by_score};
+    return {reward, reward + target_reward, is_target};
   }
 
   bool real_placement_set_;
@@ -862,7 +881,8 @@ class Tetris {
                  int microadj_delay = 40, double orig_misdrop_rate = 5e-3,
                  double misdrop_param_time = 400,
                  double misdrop_param_pow = 1.0, int target = 1000000,
-                 double reward_multiplier = 2e-6) {
+                 double reward_multiplier = 2e-6, double right_gain = 0.2,
+                 double penalty_multiplier = 1.0, double step_reward = 0.) {
     start_level_ = start_level;
     lines_ = 0;
     score_ = 0;
@@ -874,6 +894,9 @@ class Tetris {
     consecutive_invalid_ = 0;
     for (auto& i : field_) std::fill(i.begin(), i.end(), false);
     reward_multiplier_ = reward_multiplier;
+    right_gain_ = right_gain;
+    penalty_multiplier_ = penalty_multiplier;
+    step_reward_ = step_reward;
     hz_avg_ = hz_avg;
     hz_dev_ = hz_dev;
     das_ = das;
@@ -894,7 +917,7 @@ class Tetris {
     StoreMap_(false);
   }
 
-  void ResetRandom(double fix_prob) {
+  void ResetRandom(double fix_prob, double right_gain, double penalty_multiplier, double step_reward) {
     using IntRand = std::uniform_int_distribution<int>;
     using GammaRand = std::gamma_distribution<double>;
     auto Padded = [&](auto&& dist, double uniform_ratio, double l, double r) {
@@ -957,7 +980,7 @@ class Tetris {
     }
     ResetGame(start_level, hz_avg, hz_dev, das, first_tap_max, microadj_delay,
               orig_misdrop_rate, misdrop_param_time, misdrop_param_pow, target,
-              reward_multiplier);
+              reward_multiplier, right_gain, penalty_multiplier, step_reward);
   }
 
   static int PlaceField(Field& field, int piece, const Position& pos) {
@@ -1027,6 +1050,7 @@ class Tetris {
     // 17: score
     misc[17] = (place_stage_ ? temp_score_ : score_) * 5e-6;
     // 18: target
+    // Update model.py if this multiplier changed
     misc[18] = target_ * 5e-6;
     // 19: reward_multiplier
     misc[19] = reward_multiplier_ * 2e+5;
@@ -1076,13 +1100,13 @@ class Tetris {
     return ret;
   }
 
-  std::pair<double, double> InputPlacement(const Position& pos, bool training = true) {
+  Reward InputPlacement(const Position& pos, bool training = true) {
     if (game_over_) return {0, 0};
     bool orig_stage = place_stage_;
     if (pos.rotate >= (int)stored_mp_lb_.size() || pos.x >= kN || pos.y >= kM) {
       return {kInvalidReward_, 0};
     }
-    std::pair<double, double> ret = InputPlacement_(pos);
+    Reward ret = InputPlacement_(pos);
     if (training && orig_stage && !place_stage_) TrainingSetPlacement();
     return ret;
   }
@@ -1347,12 +1371,13 @@ static int TetrisInit(Tetris* self, PyObject* args, PyObject* kwds) {
 }
 
 static PyObject* Tetris_ResetRandom(Tetris* self, PyObject* args, PyObject* kwds) {
-  static const char *kwlist[] = {"fix_prob", nullptr};
-  double fix_prob = 0.9;
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|d", (char**)kwlist, &fix_prob)) {
+  static const char *kwlist[] = {"fix_prob", "right_gain", "penalty_multiplier", "step_reward", nullptr};
+  double fix_prob = 0.9, right_gain = 0.2, penalty_multiplier = 0.0, step_reward = 0.0;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "dddd", (char**)kwlist,
+        &fix_prob, &right_gain, &penalty_multiplier, &step_reward)) {
     return nullptr;
   }
-  self->ResetRandom(fix_prob);
+  self->ResetRandom(fix_prob, right_gain, penalty_multiplier, step_reward);
   Py_RETURN_NONE;
 }
 
@@ -1367,8 +1392,9 @@ static PyObject* Tetris_InputPlacement(Tetris* self, PyObject* args, PyObject* k
                                    &x, &y, &training)) {
     return nullptr;
   }
-  std::pair<double, double> reward = self->InputPlacement({rotate, x, y}, training);
-  return PyTuple_Pack(2, PyFloat_FromDouble(reward.first), PyFloat_FromDouble(reward.second));
+  Tetris::Reward reward = self->InputPlacement({rotate, x, y}, training);
+  return PyTuple_Pack(3, PyFloat_FromDouble(reward.score_reward), PyFloat_FromDouble(reward.tot_reward),
+      PyFloat_FromDouble((double)reward.target));
 }
 
 static PyObject* Tetris_GetState(Tetris* self, PyObject* Py_UNUSED(ignored)) {
