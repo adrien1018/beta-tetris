@@ -1371,10 +1371,13 @@ static int TetrisInit(Tetris* self, PyObject* args, PyObject* kwds) {
 }
 
 static PyObject* Tetris_ResetRandom(Tetris* self, PyObject* args, PyObject* kwds) {
-  static const char *kwlist[] = {"fix_prob", "right_gain", "penalty_multiplier", "step_reward", nullptr};
-  double fix_prob = 0.9, right_gain = 0.2, penalty_multiplier = 0.0, step_reward = 0.0;
+  static const char* kwlist[] = {"fix_prob", "right_gain", "penalty_multiplier",
+                                 "step_reward", nullptr};
+  double fix_prob = 0.9, right_gain = 0.2, penalty_multiplier = 0.0,
+         step_reward = 0.0;
   if (!PyArg_ParseTupleAndKeywords(args, kwds, "dddd", (char**)kwlist,
-        &fix_prob, &right_gain, &penalty_multiplier, &step_reward)) {
+                                   &fix_prob, &right_gain, &penalty_multiplier,
+                                   &step_reward)) {
     return nullptr;
   }
   self->ResetRandom(fix_prob, right_gain, penalty_multiplier, step_reward);
@@ -1386,15 +1389,67 @@ static PyObject* Tetris_IsOver(Tetris* self, PyObject* Py_UNUSED(ignored)) {
 }
 
 static PyObject* Tetris_InputPlacement(Tetris* self, PyObject* args, PyObject* kwds) {
-  static const char *kwlist[] = {"rotate", "x", "y", "training", nullptr};
+  static const char* kwlist[] = {"rotate", "x", "y", "training", nullptr};
   int rotate, x, y, training = 1;
   if (!PyArg_ParseTupleAndKeywords(args, kwds, "iii|p", (char**)kwlist, &rotate,
                                    &x, &y, &training)) {
     return nullptr;
   }
   Tetris::Reward reward = self->InputPlacement({rotate, x, y}, training);
-  return PyTuple_Pack(3, PyFloat_FromDouble(reward.score_reward), PyFloat_FromDouble(reward.tot_reward),
-      PyFloat_FromDouble((double)reward.target));
+  return PyTuple_Pack(3, PyFloat_FromDouble(reward.score_reward),
+                      PyFloat_FromDouble(reward.tot_reward),
+                      PyFloat_FromDouble((double)reward.target));
+}
+
+static PyObject* Tetris_SetPreviousPlacement(Tetris* self, PyObject* args, PyObject* kwds) {
+  static const char *kwlist[] = {"rotate", "x", "y", nullptr};
+  int rotate, x, y;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "iii", (char**)kwlist, &rotate, &x, &y)) {
+    return nullptr;
+  }
+  return PyBool_FromLong(self->SetPreviousPlacement({rotate, x, y}));
+}
+
+static int ParsePieceID(PyObject* args, PyObject* kwds) {
+  static const char *kwlist[] = {"piece", nullptr};
+  int piece = -1;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", (char**)kwlist, &piece)) {
+    PyErr_Clear();
+    Py_buffer buf{};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "s*", (char**)kwlist, &buf)) {
+      return -2;
+    }
+    if (buf.len == 1) {
+      switch (((char*)buf.buf)[0]) {
+        case 'T': piece = 0; break;
+        case 'J': piece = 1; break;
+        case 'Z': piece = 2; break;
+        case 'O': piece = 3; break;
+        case 'S': piece = 4; break;
+        case 'L': piece = 5; break;
+        case 'I': piece = 6; break;
+      }
+    }
+    PyBuffer_Release(&buf);
+  }
+  if (piece < 0 || piece >= 7) {
+    PyErr_SetString(PyExc_IndexError, "Invalid piece character or number");
+    return -1;
+  }
+  return piece;
+}
+
+static PyObject* Tetris_SetNowPiece(Tetris* self, PyObject* args, PyObject* kwds) {
+  int piece = ParsePieceID(args, kwds);
+  if (piece < 0) return nullptr;
+  return PyBool_FromLong(self->SetNowPiece(piece));
+}
+
+static PyObject* Tetris_SetNextPiece(Tetris* self, PyObject* args, PyObject* kwds) {
+  int piece = ParsePieceID(args, kwds);
+  if (piece < 0) return nullptr;
+  self->SetNextPiece(piece);
+  Py_RETURN_NONE;
 }
 
 static PyObject* Tetris_GetState(Tetris* self, PyObject* Py_UNUSED(ignored)) {
@@ -1416,28 +1471,32 @@ static PyObject* Tetris_ResetGame(Tetris* self, PyObject* args, PyObject* kwds) 
   static const char* kwlist[] = {
       "start_level", "hz_avg", "hz_dev", "das", "first_tap_max",
       "microadj_delay", "orig_misdrop_rate", "misdrop_param_time",
-      "misdrop_param_pow", "target", "reward_multiplier", nullptr
+      "misdrop_param_pow", "target", "reward_multiplier",
+      "right_gain", "penalty_multiplier", "step_reward", nullptr
   };
   int start_level = 18;
-  double hz_avg = 10;
+  double hz_avg = 12;
   double hz_dev = 0;
-  int das = 1;
+  int das = 0;
   double first_tap_max = 30;
   int microadj_delay = 40;
-  double orig_misdrop_rate = 5e-3;
+  double orig_misdrop_rate = 0;
   double misdrop_param_time = 400;
   double misdrop_param_pow = 1.0;
   int target = 1000000;
   double reward_multiplier = 2e-6;
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|iddpdidddid", (char**)kwlist,
+  double right_gain = 0.2;
+  double penalty_multiplier = 0.0;
+  double step_reward = 0.0;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|iddpdidddidddd", (char**)kwlist,
         &start_level, &hz_avg, &hz_dev, &das, &first_tap_max, &microadj_delay,
         &orig_misdrop_rate, &misdrop_param_time, &misdrop_param_pow, &target,
-        &reward_multiplier)) {
+        &reward_multiplier, &right_gain, &penalty_multiplier, &step_reward)) {
     return nullptr;
   }
   self->ResetGame(start_level, hz_avg, hz_dev, das, first_tap_max,
       microadj_delay, orig_misdrop_rate, misdrop_param_time, misdrop_param_pow,
-      target, reward_multiplier);
+      target, reward_multiplier, right_gain, penalty_multiplier, step_reward);
   Py_RETURN_NONE;
 }
 
@@ -1469,8 +1528,8 @@ static PyObject* Tetris_PrintAllState(Tetris* self, PyObject* Py_UNUSED(ignored)
 #endif
 
 static PyMethodDef py_tetris_methods[] = {
-    {"ResetRandom", (PyCFunction)Tetris_ResetRandom, METH_VARARGS | METH_KEYWORDS,
-     "Reset a game using random parameters"},
+    {"ResetRandom", (PyCFunction)Tetris_ResetRandom,
+     METH_VARARGS | METH_KEYWORDS, "Reset a game using random parameters"},
     {"IsOver", (PyCFunction)Tetris_IsOver, METH_NOARGS,
      "Check whether the game is over"},
     {"InputPlacement", (PyCFunction)Tetris_InputPlacement,
@@ -1482,6 +1541,12 @@ static PyMethodDef py_tetris_methods[] = {
      "Reset a game using given parameters"},
     {"GetLines", (PyCFunction)Tetris_GetLines, METH_NOARGS, "Get lines"},
     {"GetScore", (PyCFunction)Tetris_GetScore, METH_NOARGS, "Get score"},
+    {"SetPreviousPlacement", (PyCFunction)Tetris_SetPreviousPlacement,
+     METH_VARARGS | METH_KEYWORDS, "Set actual placement"},
+    {"SetNowPiece", (PyCFunction)Tetris_SetNowPiece,
+     METH_VARARGS | METH_KEYWORDS, "Set the current piece (at game start)"},
+    {"SetNextPiece", (PyCFunction)Tetris_SetNextPiece,
+     METH_VARARGS | METH_KEYWORDS, "Set the next piece"},
 #ifdef DEBUG_METHODS
     {"PrintState", (PyCFunction)Tetris_PrintState, METH_NOARGS,
      "Print state array"},
