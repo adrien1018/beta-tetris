@@ -104,7 +104,6 @@ class Worker:
     """Creates a new worker and runs it in a separate process."""
     def __init__(self, name, shms, idx, seed):
         self.child, parent = multiprocessing.Pipe()
-        os.environ['LD_PRELOAD'] = '/usr/lib/libasan.so'
         self.process = multiprocessing.Process(
                 target = worker_process,
                 args = (parent, name, shms, idx, seed))

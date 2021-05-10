@@ -1396,9 +1396,14 @@ static PyObject* Tetris_InputPlacement(Tetris* self, PyObject* args, PyObject* k
     return nullptr;
   }
   Tetris::Reward reward = self->InputPlacement({rotate, x, y}, training);
-  return PyTuple_Pack(3, PyFloat_FromDouble(reward.score_reward),
-                      PyFloat_FromDouble(reward.tot_reward),
-                      PyFloat_FromDouble((double)reward.target));
+  PyObject* t1 = PyFloat_FromDouble(reward.score_reward);
+  PyObject* t2 = PyFloat_FromDouble(reward.tot_reward);
+  PyObject* t3 = PyFloat_FromDouble((double)reward.target);
+  PyObject* ret = PyTuple_Pack(3, t1, t2, t3);
+  Py_DECREF(t1);
+  Py_DECREF(t2);
+  Py_DECREF(t3);
+  return ret;
 }
 
 static PyObject* Tetris_SetPreviousPlacement(Tetris* self, PyObject* args, PyObject* kwds) {
@@ -1464,7 +1469,11 @@ static PyObject* Tetris_StateShape(void*, PyObject* Py_UNUSED(ignored)) {
   PyObject* dim1 = PyLong_FromLong(std::tuple_size<Tetris::State>::value);
   PyObject* dim2 = PyLong_FromLong(Tetris::kN);
   PyObject* dim3 = PyLong_FromLong(Tetris::kM);
-  return PyTuple_Pack(3, dim1, dim2, dim3);
+  PyObject* ret = PyTuple_Pack(3, dim1, dim2, dim3);
+  Py_DECREF(dim1);
+  Py_DECREF(dim2);
+  Py_DECREF(dim3);
+  return ret;
 }
 
 static PyObject* Tetris_ResetGame(Tetris* self, PyObject* args, PyObject* kwds) {
