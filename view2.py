@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import numpy as np, torch, sys, random, time, os.path
+from torch.distributions import Categorical
+
 import tetris
 
 from game import Game, kH, kW, kTensorDim
@@ -45,16 +47,18 @@ if __name__ == "__main__":
     for i in range(len(pieces) - 1):
         game.SetNextPiece(pieces[i + 1])
         if i >= len(positions): game.PrintState()
-        pi, val = model(GetTorch(game))
-        print(val, pi.probs.max(), pi.probs[0,idx], pi.logits[0,idx])
+        pi, val = model(GetTorch(game), False)
+        pip = Categorical(logits = pi)
+        print(val, pip.probs.max().item(), pip.probs[0,idx].item(), pi[0,idx].item())
         print(game.InputPlacement(r, x, y, False))
         print('-------------------')
         tr, tx, ty = r, x, y
 
         r, x, y = InputPosition(game, i + 1)
         idx = r*200+x*10+y
-        pi, val = model(GetTorch(game))
-        print(val, pi.probs.max(), pi.probs[0,idx], pi.logits[0,idx])
+        pi, val = model(GetTorch(game), False)
+        pip = Categorical(logits = pi)
+        print(val, pip.probs.max().item(), pip.probs[0,idx].item(), pi[0,idx].item())
         print(game.InputPlacement(r, x, y, False))
         print('-------------------')
         game.SetPreviousPlacement(tr, tx, ty)

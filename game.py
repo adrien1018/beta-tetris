@@ -40,9 +40,9 @@ class Game:
         self.env.ResetRandom(self.fix_prob, self.right_gain, self.penalty_multiplier, self.step_reward)
         return self.env.GetState()
 
-def worker_process(remote: connection.Connection, shms: list, idx: slice, seed: int):
+def worker_process(remote: connection.Connection, name: str, shms: list, idx: slice, seed: int):
     if idx.start == 0:
-        fp = open('logs/%d' % os.getpid(), 'w')
+        fp = open('logs/{}/{}'.format(name, os.getpid()), 'w')
         os.dup2(fp.fileno(), 1)
         save = True
     else: save = False
@@ -102,10 +102,10 @@ def worker_process(remote: connection.Connection, shms: list, idx: slice, seed: 
 
 class Worker:
     """Creates a new worker and runs it in a separate process."""
-    def __init__(self, shms, idx, seed):
+    def __init__(self, name, shms, idx, seed):
         self.child, parent = multiprocessing.Pipe()
         os.environ['LD_PRELOAD'] = '/usr/lib/libasan.so'
         self.process = multiprocessing.Process(
                 target = worker_process,
-                args = (parent, shms, idx, seed))
+                args = (parent, name, shms, idx, seed))
         self.process.start()

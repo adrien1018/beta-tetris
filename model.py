@@ -53,7 +53,7 @@ class Model(nn.Module):
         self.value_last = nn.Linear(256, 2)
 
     @autocast()
-    def forward(self, obs: torch.Tensor):
+    def forward(self, obs: torch.Tensor, return_categorical: bool = True):
         q = torch.zeros((obs.shape[0], kInChannel, kH, kW), dtype = torch.float32, device = obs.device)
         q[:,:kOrd] = obs[:,:kOrd]
         misc = obs[:,kOrd].view(obs.shape[0], -1)[:,:kInChannel-kOrd]
@@ -71,8 +71,8 @@ class Model(nn.Module):
             value = self.value_last(value.float())
             value_tot = value[:,0] + value[:,1] * target_mul
             value = torch.cat((value, value_tot.unsqueeze(-1)), -1)
-            pi_sample = Categorical(logits = pi)
-            return pi_sample, value
+            if return_categorical: pi = Categorical(logits = pi)
+            return pi, value
 
 def obs_to_torch(obs: np.ndarray, device) -> torch.Tensor:
     return torch.tensor(obs, dtype = torch.float32, device = device)

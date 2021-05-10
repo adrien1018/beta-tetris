@@ -9,6 +9,7 @@ from multiprocessing import shared_memory
 
 import numpy as np, torch
 from torch import optim
+from torch.distributions import Categorical
 from torch.cuda.amp import autocast, GradScaler
 
 from labml import monit, tracker, logger, experiment
@@ -24,7 +25,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class Main:
-    def __init__(self, c: Configs):
+    def __init__(self, c: Configs, name: str):
+        self.name = name
         self.c = c
         # total number of samples for a single update
         self.envs = self.c.n_workers * self.c.env_per_worker
@@ -45,6 +47,9 @@ class Main:
         self.cur_right_gain = 0.
         self.cur_fix_prob = 0.
         self.cur_neg_mul = 0.
+        self.cur_entropy_weight = self.c.entropy_weight()
+        self.cur_prob_reg_weight = self.c.prob_reg_weight()
+        self.cur_target_prob_weight = self.c.target_prob_weight()
 
         # optimizer
         self.scaler = GradScaler()
@@ -66,7 +71,7 @@ class Main:
         ]
         # create workers
         shm = [(shm.name, shape, typ) for shm, shape, typ in zip(self.shms, shapes, types)]
-        self.workers = [Worker(shm, self.w_range(i), 27 + i) for i in range(self.c.n_workers)]
+        self.workers = [Worker(name, shm, self.w_range(i), 27 + i) for i in range(self.c.n_workers)]
         self.set_game_param(self.c.right_gain(), self.c.fix_prob(), self.c.neg_mul(), self.c.step_reward())
         for i in self.workers: i.child.send(('reset', None))
         for i in self.workers: i.child.recv()
@@ -90,6 +95,11 @@ class Main:
         self.cur_fix_prob = fix_prob
         self.cur_neg_mul = neg_mul
         self.cur_step_reward = step_reward
+
+    def set_weight_param(self, entropy, prob_reg, target_prob):
+        self.cur_entropy_weight = entropy
+        self.cur_prob_reg_weight = prob_reg
+        self.cur_target_prob_weight = target_prob
 
     def w_range(self, x): return slice(x * self.c.env_per_worker, (x + 1) * self.c.env_per_worker)
 
@@ -232,7 +242,8 @@ class Main:
     def _calc_loss(self, samples: Dict[str, torch.Tensor], clip_range: float) -> torch.Tensor:
         """## PPO Loss"""
         # Sampled observations are fed into the model to get $\pi_\theta(a_t|s_t)$ and $V^{\pi_\theta}(s_t)$;
-        pi, value = self.model(samples['obs'])
+        pi_val, value = self.model(samples['obs'], False)
+        pi = Categorical(logits = pi_val)
 
         # #### Policy
         log_pi = pi.log_prob(samples['actions'])
@@ -253,6 +264,9 @@ class Main:
         # #### Entropy Bonus
         entropy_bonus = pi.entropy()
         entropy_bonus = entropy_bonus.mean()
+        # add regularization to logits to revive previously-seen impossible moves
+        max_logit = pi_val.max().item()
+        prob_reg = -(torch.nan_to_num(pi_val - max_logit, neginf = 0) ** 2).mean() * self.cur_prob_reg_weight
 
         # #### Value
         # Clipping makes sure the value function $V_\theta$ doesn't deviate
@@ -261,18 +275,21 @@ class Main:
                 min = -clip_range, max = clip_range)
         vf_loss = torch.max((value[:,:2] - samples['returns']) ** 2,
                             (clipped_value - samples['returns']) ** 2)
-        vf_loss[:,1] *= self.c.target_prob_weight
+        vf_loss[:,1] *= self.cur_target_prob_weight
+        vf_loss_score = 0.5 * vf_loss[:,0].mean()
         vf_loss = 0.5 * vf_loss.sum(-1).mean()
 
         # we want to maximize $\mathcal{L}^{CLIP+VF+EB}(\theta)$
         # so we take the negative of it as the loss
-        loss = -(policy_reward - self.c.vf_weight * vf_loss + self.c.entropy_weight * entropy_bonus)
+        loss = -(policy_reward - self.c.vf_weight * vf_loss + \
+                self.cur_entropy_weight * (entropy_bonus + prob_reg))
 
         # for monitoring
         approx_kl_divergence = .5 * ((samples['log_pis'] - log_pi) ** 2).mean()
         clip_fraction = (abs((ratio - 1.0)) > clip_range).to(torch.float).mean()
         tracker.add({'policy_reward': policy_reward,
                      'vf_loss': vf_loss ** 0.5,
+                     'vf_loss_1': vf_loss_score ** 0.5,
                      'entropy_bonus': entropy_bonus,
                      'kl_div': approx_kl_divergence,
                      'clip_fraction': clip_fraction})
@@ -281,8 +298,6 @@ class Main:
     def run_training_loop(self):
         """### Run training loop"""
         offset = tracker.get_global_step()
-        tracker.set_queue('score', 400, True)
-        tracker.set_queue('lines', 400, True)
         if offset > 100:
             # If resumed, sample several iterations first to reduce sampling bias
             for i in range(16): self.sample(False)
@@ -298,6 +313,7 @@ class Main:
             if (update + 1) % 5 == 0:
                 self.set_optim(self.c.lr(), self.c.reg_l2())
                 self.set_game_param(self.c.right_gain(), self.c.fix_prob(), self.c.neg_mul(), self.c.step_reward())
+                self.set_weight_param(self.c.entropy_weight(), self.c.prob_reg_weight(), self.c.target_prob_weight())
             if (update + 1) % 25 == 0: logger.log()
             if (update + 1) % 200 == 0: experiment.save_checkpoint()
 
@@ -332,7 +348,7 @@ if __name__ == "__main__":
         if args[key] is not None:
             conf.__getattribute__(key).set_value(args[key])
     experiment.configs(conf, override_dict)
-    m = Main(conf)
+    m = Main(conf, args['name'])
     experiment.add_model_savers({
             'model': TorchSaver('model', m.model),
             'scaler': TorchSaver('scaler', m.scaler),
