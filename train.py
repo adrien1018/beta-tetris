@@ -50,6 +50,7 @@ class Main:
         self.cur_entropy_weight = self.c.entropy_weight()
         self.cur_prob_reg_weight = self.c.prob_reg_weight()
         self.cur_target_prob_weight = self.c.target_prob_weight()
+        self.cur_gamma = self.c.gamma()
 
         # optimizer
         self.scaler = GradScaler()
@@ -96,10 +97,11 @@ class Main:
         self.cur_neg_mul = neg_mul
         self.cur_step_reward = step_reward
 
-    def set_weight_param(self, entropy, prob_reg, target_prob):
+    def set_weight_param(self, entropy, prob_reg, target_prob, gamma):
         self.cur_entropy_weight = entropy
         self.cur_prob_reg_weight = prob_reg
         self.cur_target_prob_weight = target_prob
+        self.cur_gamma = gamma
 
     def w_range(self, x): return slice(x * self.c.env_per_worker, (x + 1) * self.c.env_per_worker)
 
@@ -192,9 +194,9 @@ class Main:
                 last_value = last_value * mask
                 last_advantage = last_advantage * mask
                 # $\delta_t$
-                delta = rewards[:, t] + self.c.gamma * last_value - values[:, t]
+                delta = rewards[:, t] + self.cur_gamma * last_value - values[:, t]
                 # $\hat{A_t} = \delta_t + \gamma \lambda \hat{A_{t+1}}$
-                last_advantage = delta + self.c.gamma * self.c.lamda * last_advantage
+                last_advantage = delta + self.cur_gamma * self.c.lamda * last_advantage
                 # note that we are collecting in reverse order.
                 advantages[:, t] = last_advantage
                 last_value = values[:, t]
@@ -310,10 +312,10 @@ class Main:
             self.train(samples)
             # write summary info to the writer, and log to the screen
             tracker.save()
-            if (update + 1) % 5 == 0:
+            if (update + 1) % 2 == 0:
                 self.set_optim(self.c.lr(), self.c.reg_l2())
                 self.set_game_param(self.c.right_gain(), self.c.fix_prob(), self.c.neg_mul(), self.c.step_reward())
-                self.set_weight_param(self.c.entropy_weight(), self.c.prob_reg_weight(), self.c.target_prob_weight())
+                self.set_weight_param(self.c.entropy_weight(), self.c.prob_reg_weight(), self.c.target_prob_weight(), self.c.gamma())
             if (update + 1) % 25 == 0: logger.log()
             if (update + 1) % 200 == 0: experiment.save_checkpoint()
 
@@ -342,6 +344,7 @@ if __name__ == "__main__":
             int(args['name'], 16)
             parser.error('Experiment name should not be uuid-like')
     except ValueError: pass
+    os.makedirs('logs/{}'.format(args['name']))
     experiment.create(name = args['name'])
     conf = Configs()
     for key in dynamic_keys:
