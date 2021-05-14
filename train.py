@@ -126,6 +126,8 @@ class Main:
         values = torch.zeros((self.envs, self.c.worker_steps, 3), dtype = torch.float32, device = device)
 
         # sample `worker_steps` from each worker
+        tot_lines = 0
+        tot_score = 0
         for t in range(self.c.worker_steps):
             with torch.no_grad():
                 # `self.obs` keeps track of the last observation from each worker,
@@ -149,6 +151,8 @@ class Main:
                 if train:
                     self.total_games += len(info_arr)
                     for info in info_arr:
+                        tot_lines += info['lines']
+                        tot_score += info['score']
                         tracker.add('reward', info['reward'])
                         tracker.add('scorek', info['score'] * 1e-3)
                         tracker.add('lines', info['lines'])
@@ -160,6 +164,7 @@ class Main:
         if train:
             tracker.add('maxk', reward_max / 1e-2)
             tracker.add('mil_games', self.total_games * 1e-6)
+            tracker.add('perline', tot_score * 1e-3 / tot_lines)
 
         # calculate advantages
         advantages = self._calc_advantages(self.done, self.rewards, values)
@@ -344,7 +349,7 @@ if __name__ == "__main__":
             int(args['name'], 16)
             parser.error('Experiment name should not be uuid-like')
     except ValueError: pass
-    os.makedirs('logs/{}'.format(args['name']))
+    os.makedirs('logs/{}'.format(args['name']), exist_ok = True)
     experiment.create(name = args['name'])
     conf = Configs()
     for key in dynamic_keys:

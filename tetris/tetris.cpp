@@ -747,7 +747,7 @@ class Tetris {
     // step 1
     if (!CheckMovePossible_(stored_mp_lb_, pos)) {
       if (++consecutive_invalid_ == 3) game_over_ = true;
-      return {kInvalidReward_, 0};
+      return {kInvalidReward_, 0, 0};
     }
     double reward = 0;
     int level = GetLevel_(start_level_, lines_);
@@ -1101,10 +1101,10 @@ class Tetris {
   }
 
   Reward InputPlacement(const Position& pos, bool training = true) {
-    if (game_over_) return {0, 0};
+    if (game_over_) return {0, 0, 0};
     bool orig_stage = place_stage_;
     if (pos.rotate >= (int)stored_mp_lb_.size() || pos.x >= kN || pos.y >= kM) {
-      return {kInvalidReward_, 0};
+      return {kInvalidReward_, 0, 0};
     }
     Reward ret = InputPlacement_(pos);
     if (training && orig_stage && !place_stage_) TrainingSetPlacement();
@@ -1121,7 +1121,7 @@ class Tetris {
   //   2. InputPlacement
   //   3. GetState
   //   4. InputPlacement
-  //   5. TrainingSetPlacement
+  //   5. TrainingSetPlacement (auto-called by InputPlacement)
 
   // # Evaluating steps:
   //   init. SetNowPiece, SetNextPiece
@@ -1611,11 +1611,12 @@ int main() {
       case 'p': t.PrintAllState(); break;
       case 'f': t.PrintState(true); break;
       case 's': t.PrintState(); break;
-      case 'r': t.ResetRandom(0.5); break;
+      case 'r': t.ResetRandom(1.0, 0.0, 0.0, 1e-5); break;
       case 'i': {
         int r, x, y;
         scanf("%d %d %d", &r, &x, &y);
-        printf("Reward: %f\n", t.InputPlacement({r, x, y}));
+        Tetris::Reward rr = t.InputPlacement({r, x, y});
+        printf("Reward: %f %f %d\n", rr.score_reward, rr.tot_reward, (int)rr.target);
         break;
       }
     }
