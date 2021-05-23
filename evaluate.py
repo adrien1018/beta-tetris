@@ -20,7 +20,9 @@ def GetStrat(game):
     return act
 
 def ResetGame(game):
-    game.ResetGame(reward_multiplier = 1e-5, hz_avg = 12, hz_dev = 0, microadj_delay = 25, first_tap_max = 0)
+    # adjustable: reward_multiplier, hz_dev, hz_dev, microadj_delay, target, start_level
+    game.ResetGame(reward_multiplier = 4e-6, hz_avg = 18, hz_dev = 0,
+                   microadj_delay = 20, start_level = 18, target = 1200000)
 
 @torch.no_grad()
 def Main():
@@ -36,6 +38,7 @@ def Main():
     games = [tetris.Tetris(i * 1242979235) for i in range(batch_size)]
     for i in games: ResetGame(i)
     results = []
+    rewards = [0. for i in range(batch_size)]
     while len(results) < n:
         states = [i.GetState() for i in games]
         states = obs_to_torch(np.stack(states), device)
@@ -44,11 +47,19 @@ def Main():
         for i in range(batch_size):
             action = pi[i].item()
             r, x, y = action // 200, action // 10 % 20, action % 10
-            games[i].InputPlacement(r, x, y)
+            rewards[i] += games[i].InputPlacement(r, x, y)[1]
             if games[i].IsOver():
                 results.append((games[i].GetScore(), games[i].GetLines()))
+                rewards[i] = 0.
                 ResetGame(games[i])
-                if len(results) % 20 == 0: print(len(results))
-    print(sorted(results))
+                if len(results) % 40 == 0: print(len(results))
+    s = list(reversed(sorted([i[0] for i in results])))
+    for i in range(len(s) - 1):
+        for t in range(1500000, 700000, -50000):
+            if s[i] >= t and s[i+1] < t: print(t, (i + 1) / n)
+    s = list(reversed(sorted([i[1] for i in results])))
+    for i in range(len(s) - 1):
+        for t in range(330, 150, -10):
+            if s[i] >= t and s[i+1] < t: print(t, (i + 1) / n)
 
 if __name__ == "__main__": Main()

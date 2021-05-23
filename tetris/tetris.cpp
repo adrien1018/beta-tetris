@@ -45,6 +45,13 @@ class Tetris {
     bool valid;
     std::vector<Move> moves;
   };
+  struct FrameInput {
+    bool l, r, a, b; // l+r=r / a+b=a here
+  };
+  struct FrameSequence {
+    std::vector<FrameInput> seq;
+    bool is_charged;
+  };
   struct Position {
     int rotate, x, y;
     bool operator==(const Position& pos) const {
@@ -417,13 +424,6 @@ class Tetris {
   //          place_stage_ = false (B is also available);
   //          the current piece is now_piece_, and the next piece is next_piece_
   //  Note: The first step would have empty planned placement and place_stage_ = false
-  struct FrameInput_ {
-    bool l, r, a, b; // l+r=r / a+b=a here
-  };
-  struct FrameSequence_ {
-    std::vector<FrameInput_> seq;
-    bool is_charged;
-  };
 
   double prev_drop_time_; // in milliseconds
   bool prev_misdrop_, prev_micro_, das_charged_;
@@ -432,8 +432,10 @@ class Tetris {
   Position real_placement_; // S in step 1
   // Information about B (used as B' in step 1)
   Position planned_placement_; // also used to store A (used as state in step 2)
+  Position prev_planned_placement_;
   MoveSequence planned_seq_;
-  FrameSequence_ planned_fseq_;
+  FrameSequence planned_fseq_;
+  FrameSequence real_fseq_;
   bool planned_quicktap_;
 
   // Game information after placed by A
@@ -527,10 +529,10 @@ class Tetris {
     return ub;
   }
 
-  FrameSequence_ SequenceToFrame_(
+  FrameSequence SequenceToFrame_(
       const MoveSequence& seq, double hz, bool misdrop, bool quicktap,
       int frames_per_drop, int start_row = 0,
-      const FrameSequence_& prev_input = FrameSequence_{}) {
+      const FrameSequence& prev_input = FrameSequence{}) {
     const double start_delay = misdrop ? RealRand_(0, first_tap_max_)(rng_) : 0;
     const double base_interval = 1000. / hz;
     const bool is_micro = !prev_input.seq.empty();
@@ -560,10 +562,10 @@ class Tetris {
       }
     }
 
-    std::vector<FrameInput_> ret = prev_input.seq;
+    std::vector<FrameInput> ret = prev_input.seq;
     bool is_charged = true;
     auto Set = [&ret](size_t frame, MoveType mv) {
-      if (ret.size() <= frame) ret.resize(frame + 1, FrameInput_{});
+      if (ret.size() <= frame) ret.resize(frame + 1, FrameInput{});
       switch (mv) {
         case MoveType::kA: ret[frame].a = true; break;
         case MoveType::kB: ret[frame].b = true; break;
@@ -670,7 +672,7 @@ class Tetris {
     return {ret, is_charged};
   }
 
-  static Position Simulate_(const Map_& mp, const FrameSequence_& seq, int frames_per_drop, bool finish = true) {
+  static Position Simulate_(const Map_& mp, const FrameSequence& seq, int frames_per_drop, bool finish = true) {
     Position now = kStartPosition_;
     int R = mp.size();
     for (size_t i = 0; i < seq.seq.size(); i++) {
@@ -721,6 +723,7 @@ class Tetris {
       }
       MoveSequence seq = GetMoveSequence_(stored_mp_, stored_mp_lb_, kStartPosition_, pos);
       double reward = 0;
+      prev_planned_placement_ = planned_placement_;
       planned_placement_ = pos;
       planned_seq_ = seq;
       int frames_per_drop = GetFramesPerDrop_(GetLevel_(start_level_, temp_lines_));
@@ -758,9 +761,12 @@ class Tetris {
       prev_misdrop_ = false;
       prev_micro_ = false;
       das_charged_ = true; // we can make it charged anyway
+      MoveSequence cur_seq =
+          GetMoveSequence_(stored_mp_, stored_mp_lb_, kStartPosition_, pos);
+      real_fseq_ = SequenceToFrame_(cur_seq, hz_avg_, true, false, frames_per_drop);
     } else {
       if (!real_placement_set_) throw 1; // TODO
-      FrameSequence_ fseq;
+      FrameSequence fseq;
       double hz = NormalRand_(hz_avg_, hz_dev_)(rng_);
       if (hz < 8) hz = 8;
       if (hz > 30) hz = 30;
@@ -806,12 +812,12 @@ class Tetris {
                                   pos_before_adj.x, fseq);
         }
       }
-      //Print(fseq);
       real_placement_ = Simulate_(stored_mp_, fseq, frames_per_drop);
       prev_misdrop_ = real_placement_ != pos;
       if (prev_misdrop_) reward += kMisdropReward_ * penalty_multiplier_;
       prev_micro_ = !flag;
       das_charged_ = fseq.is_charged;
+      real_fseq_ = std::move(fseq);
     }
     planned_placement_ = pos;
     temp_field_ = field_;
@@ -853,6 +859,7 @@ class Tetris {
 
   bool SetRealPlacement_(const Position& pos) {
     if (real_placement_set_) return false;
+    prev_misdrop_ = pos != prev_planned_placement_;
     real_placement_ = pos;
     int real_lines = PlaceField(field_, now_piece_, real_placement_);
     int level = GetLevel_(start_level_, lines_);
@@ -1100,6 +1107,25 @@ class Tetris {
     return ret;
   }
 
+  FrameSequence GetPlannedSequence(bool truncate = true) const {
+    FrameSequence fseq = planned_fseq_;
+    if (truncate) fseq.seq.resize(std::max(microadj_delay_ - 1, 0), FrameInput{});
+    return fseq;
+  }
+
+  FrameSequence GetMicroadjSequence(bool truncate = true) const {
+    FrameSequence fseq = real_fseq_;
+    if (truncate && pieces_ > 1) {
+      size_t n = std::max(microadj_delay_ - 1, 0);
+      if (fseq.seq.size() <= n) {
+        fseq.seq.clear();
+      } else {
+        fseq.seq.erase(fseq.seq.begin(), fseq.seq.begin() + n);
+      }
+    }
+    return fseq;
+  }
+
   Reward InputPlacement(const Position& pos, bool training = true) {
     if (game_over_) return {0, 0, 0};
     bool orig_stage = place_stage_;
@@ -1209,7 +1235,7 @@ private:
     for (auto& i : seq.moves) Print(i);
     putchar('\n');
   }
-  static void Print(const FrameSequence_& seq) {
+  static void Print(const FrameSequence& seq) {
     printf("(charged:%d)", (int)seq.is_charged);
     for (auto& i : seq.seq) {
       std::string str;
@@ -1487,7 +1513,7 @@ static PyObject* Tetris_ResetGame(Tetris* self, PyObject* args, PyObject* kwds) 
   double hz_avg = 12;
   double hz_dev = 0;
   int das = 0;
-  double first_tap_max = 30;
+  double first_tap_max = 0;
   int microadj_delay = 40;
   double orig_misdrop_rate = 0;
   double misdrop_param_time = 400;
@@ -1515,6 +1541,48 @@ static PyObject* Tetris_GetScore(Tetris* self, PyObject* Py_UNUSED(ignored)) {
 
 static PyObject* Tetris_GetLines(Tetris* self, PyObject* Py_UNUSED(ignored)) {
   return PyLong_FromLong(self->GetLines());
+}
+
+static inline PyObject* FramePyObject(const Tetris::FrameInput& f) {
+  PyObject* ret = PyDict_New();
+  PyObject *v1 = PyBool_FromLong(f.a), *v2 = PyBool_FromLong(f.b),
+           *v3 = PyBool_FromLong(f.l), *v4 = PyBool_FromLong(f.r);
+  PyDict_SetItemString(ret, "A", v1);
+  PyDict_SetItemString(ret, "B", v2);
+  PyDict_SetItemString(ret, "left", v3);
+  PyDict_SetItemString(ret, "right", v4);
+  Py_DECREF(v1);
+  Py_DECREF(v2);
+  Py_DECREF(v3);
+  Py_DECREF(v4);
+  return ret;
+}
+
+static PyObject* SequencePyObject(const Tetris::FrameSequence& fseq) {
+  PyObject* ret = PyList_New(fseq.seq.size());
+  for (size_t i = 0; i < fseq.seq.size(); i++) {
+    PyObject* item = FramePyObject(fseq.seq[i]);
+    PyList_SetItem(ret, i, item); // steal ref
+  }
+  return ret;
+}
+
+static PyObject* Tetris_GetPlannedSequence(Tetris* self, PyObject* args, PyObject* kwds) {
+  static const char *kwlist[] = {"truncate", nullptr};
+  int truncate = 1;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|p", (char**)kwlist, &truncate)) {
+    return nullptr;
+  }
+  return SequencePyObject(self->GetPlannedSequence(truncate));
+}
+
+static PyObject* Tetris_GetMicroadjSequence(Tetris* self, PyObject* args, PyObject* kwds) {
+  static const char *kwlist[] = {"truncate", nullptr};
+  int truncate = 1;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|p", (char**)kwlist, &truncate)) {
+    return nullptr;
+  }
+  return SequencePyObject(self->GetMicroadjSequence(truncate));
 }
 
 #ifdef DEBUG_METHODS
@@ -1550,6 +1618,10 @@ static PyMethodDef py_tetris_methods[] = {
      "Reset a game using given parameters"},
     {"GetLines", (PyCFunction)Tetris_GetLines, METH_NOARGS, "Get lines"},
     {"GetScore", (PyCFunction)Tetris_GetScore, METH_NOARGS, "Get score"},
+    {"GetPlannedSequence", (PyCFunction)Tetris_GetPlannedSequence,
+     METH_VARARGS | METH_KEYWORDS, "Get planned frame input sequence"},
+    {"GetMicroadjSequence", (PyCFunction)Tetris_GetMicroadjSequence,
+     METH_VARARGS | METH_KEYWORDS, "Get microadjustment frame input sequence"},
     {"SetPreviousPlacement", (PyCFunction)Tetris_SetPreviousPlacement,
      METH_VARARGS | METH_KEYWORDS, "Set actual placement"},
     {"SetNowPiece", (PyCFunction)Tetris_SetNowPiece,
@@ -1611,7 +1683,7 @@ int main() {
       case 'p': t.PrintAllState(); break;
       case 'f': t.PrintState(true); break;
       case 's': t.PrintState(); break;
-      case 'r': t.ResetRandom(1.0, 0.0, 0.0, 1e-5); break;
+      case 'r': t.ResetRandom(0.3, 0.0, 0.0, 1e-5); break;
       case 'i': {
         int r, x, y;
         scanf("%d %d %d", &r, &x, &y);
