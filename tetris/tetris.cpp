@@ -578,7 +578,7 @@ class Tetris {
         const auto& move = seq.moves[i];
         double lower = prev;
         if (!IsAB(move.type) && move.height_start == start_row) {
-          lower = start_delay;
+          lower = std::max(lower, start_delay);
         } else if (i > 0 && !IsAB(move.type) && IsAB(seq.moves[i - 1].type)) {
           lower += kFrameLength_;
         }
@@ -1109,18 +1109,17 @@ class Tetris {
 
   FrameSequence GetPlannedSequence(bool truncate = true) const {
     FrameSequence fseq = planned_fseq_;
-    if (truncate) fseq.seq.resize(std::max(microadj_delay_ - 1, 0), FrameInput{});
+    if (truncate) fseq.seq.resize(microadj_delay_, FrameInput{});
     return fseq;
   }
 
   FrameSequence GetMicroadjSequence(bool truncate = true) const {
     FrameSequence fseq = real_fseq_;
     if (truncate && pieces_ > 1) {
-      size_t n = std::max(microadj_delay_ - 1, 0);
-      if (fseq.seq.size() <= n) {
+      if (fseq.seq.size() <= (size_t)microadj_delay_) {
         fseq.seq.clear();
       } else {
-        fseq.seq.erase(fseq.seq.begin(), fseq.seq.begin() + n);
+        fseq.seq.erase(fseq.seq.begin(), fseq.seq.begin() + microadj_delay_);
       }
     }
     return fseq;
