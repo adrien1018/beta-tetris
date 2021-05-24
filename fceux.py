@@ -42,37 +42,61 @@ class GameConn(socketserver.BaseRequestHandler):
 
     @staticmethod
     def gen_seq(seq):
+        if len(seq) == 0: return bytes([0xfe, 1, 0])
         return bytes([0xfe, len(seq)] + [GameConn.frame_to_num(i) for i in seq])
+
+    @staticmethod
+    def print_seq(seq):
+        ss = ''
+        for i in seq:
+            s = ''
+            for h, l in zip(['left', 'right', 'A', 'B'], 'LRAB'):
+                if i[h]: s += l
+            if s == '': s = '-'
+            ss += s + ' '
+        print(ss)
 
     def handle(self):
         print('connected')
         game = tetris.Tetris(12490)
-        try:
-            while True:
+        while True:
+            try:
                 data = self.read_until(1)
                 if data[0] == 0xff:
                     cur, nxt, level = self.read_until(3)
                     # adjustable: reward_multiplier, hz_dev, hz_dev, microadj_delay, target, start_level
-                    game.ResetGame(reward_multiplier = 1e-5, hz_avg = 14, hz_dev = 0,
+                    game.ResetGame(reward_multiplier = 1e-5, hz_avg = 12, hz_dev = 0,
                                 microadj_delay = 25, start_level = level, target = 1000000)
                     game.SetNowPiece(cur)
                     game.SetNextPiece(nxt)
                     print('start cur {} nxt {} level {}'.format(cur, nxt, level))
                     game.InputPlacement(*GetStrat(model, game), False)
-                    self.request.send(self.gen_seq(game.GetMicroadjSequence()))
+                    seq = game.GetMicroadjSequence()
+                    self.print_seq(seq)
+                    self.request.send(self.gen_seq(seq))
                     game.InputPlacement(*GetStrat(model, game), False)
-                    self.request.send(self.gen_seq(game.GetPlannedSequence()))
+                    seq = game.GetPlannedSequence()
+                    self.print_seq(seq)
+                    self.request.send(self.gen_seq(seq))
                 elif data[0] == 0xfd:
                     r, x, y, nxt = self.read_until(4)
                     print('pos ({}, {}, {}) nxt {}'.format(r, x, y, nxt))
                     game.SetPreviousPlacement(r, x, y)
                     game.SetNextPiece(nxt)
+                    # game.PrintState()
                     game.InputPlacement(*GetStrat(model, game), False)
-                    self.request.send(self.gen_seq(game.GetMicroadjSequence()))
+                    seq = game.GetMicroadjSequence()
+                    self.print_seq(seq)
+                    self.request.send(self.gen_seq(seq))
                     game.InputPlacement(*GetStrat(model, game), False)
-                    self.request.send(self.gen_seq(game.GetPlannedSequence()))
-        except ConnectionResetError:
-            self.request.close()
+                    seq = game.GetPlannedSequence()
+                    self.print_seq(seq)
+                    self.request.send(self.gen_seq(seq))
+            except ConnectionResetError:
+                self.request.close()
+                break
+            except ValueError:
+                pass
 
 if __name__ == "__main__":
     with torch.no_grad():
