@@ -4,7 +4,7 @@ class Configs(BaseConfigs):
     # #### Configurations
     # $\gamma$ and $\lambda$ for advantage calculation
     gamma: float = FloatDynamicHyperParam(0.99, range_ = (0.98, 1))
-    lamda: float = 0.95
+    lamda: float = FloatDynamicHyperParam(0.95, range_ = (0.9, 1))
     # number of updates
     updates: int = 100000
     # number of epochs to train the model with sampled data
