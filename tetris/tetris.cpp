@@ -940,9 +940,9 @@ class Tetris {
     double s_param = RealRand_(0, 1)(rng_); // strength parameter
     int start_level = IntRand(18, 19)(rng_);
     bool das = false;
-    double hz_avg = Padded(NormalRand_(11 + 7 * s_param, 2), 0.3, 9, 15 + 15 * s_param);
-    double hz_dev = Padded(GammaRand(2.5, (hz_avg / (6 + s_param * 6)) * 0.125),
-                           0.1, 0, hz_avg / (6 + s_param * 6));
+    double hz_avg = Padded(NormalRand_(11 + 7 * s_param, 3), 0.3, 9, 15 + 15 * s_param);
+    double hz_dev = Padded(GammaRand(2.5, (hz_avg / (6 + s_param * 4)) * 0.15),
+                           0.2, 0, hz_avg / (6 + s_param * 4));
     /*
     if (RealRand_(0, 1)(rng_) < 0.3) {
       das = true;
@@ -971,7 +971,7 @@ class Tetris {
       reward_multiplier = 1e-5;
     }*/
     double first_tap_max = 0;
-    int microadj_delay = Padded(NormalRand_(35 - s_param * 20, 5), 0.25, 0, 50 - s_param * 25);
+    int microadj_delay = Padded(NormalRand_(30 - s_param * 10, 10), 0.35, 0, 50 - s_param * 20);
     double orig_misdrop_rate = 0;
     double misdrop_param_time = 400; // arbitrary
     double misdrop_param_pow = 1; // arbitrary

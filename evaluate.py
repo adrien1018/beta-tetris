@@ -21,8 +21,11 @@ def GetStrat(game):
 
 def ResetGame(game):
     # adjustable: reward_multiplier, hz_dev, hz_dev, microadj_delay, target, start_level
-    game.ResetGame(reward_multiplier = 4e-6, hz_avg = 18, hz_dev = 0,
-                   microadj_delay = 20, start_level = 18, target = 1200000)
+    game.ResetGame(reward_multiplier = 1e-5, hz_avg = 13, hz_dev = 1,
+                   microadj_delay = 25, start_level = 18, target = 1100000)
+
+def GetSeed(i):
+    return (i * 1242979235)
 
 @torch.no_grad()
 def Main():
@@ -33,25 +36,34 @@ def Main():
     else: model.load_state_dict(torch.load(model_path))
     model.eval()
 
-    batch_size = 64
+    batch_size = 100
     n = 1200
-    games = [tetris.Tetris(i * 1242979235) for i in range(batch_size)]
+    games = [tetris.Tetris(GetSeed(i)) for i in range(batch_size)]
     for i in games: ResetGame(i)
+    started = batch_size
     results = []
     rewards = [0. for i in range(batch_size)]
+    is_running = [True for i in range(batch_size)]
     while len(results) < n:
-        states = [i.GetState() for i in games]
+        states = [i.GetState() for i, j in zip(games, is_running) if j]
         states = obs_to_torch(np.stack(states), device)
         pi = model(states, False)[0]
         pi = torch.argmax(pi, 1)
+        j = 0
         for i in range(batch_size):
-            action = pi[i].item()
+            if not is_running[i]: continue
+            action = pi[j].item()
+            j += 1
             r, x, y = action // 200, action // 10 % 20, action % 10
             rewards[i] += games[i].InputPlacement(r, x, y)[1]
             if games[i].IsOver():
                 results.append((games[i].GetScore(), games[i].GetLines()))
                 rewards[i] = 0.
-                ResetGame(games[i])
+                if started < n:
+                    games[i] = tetris.Tetris(GetSeed(i))
+                    ResetGame(games[i])
+                else:
+                    is_running[i] = False
                 if len(results) % 40 == 0: print(len(results))
     s = list(reversed(sorted([i[0] for i in results])))
     for i in range(len(s) - 1):
