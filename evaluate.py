@@ -21,11 +21,11 @@ def GetStrat(game):
 
 def ResetGame(game):
     # adjustable: reward_multiplier, hz_dev, hz_dev, microadj_delay, target, start_level
-    game.ResetGame(reward_multiplier = 1e-5, hz_avg = 13, hz_dev = 1,
+    game.ResetGame(reward_multiplier = 1e-5, hz_avg = 13, hz_dev = 0.7,
                    microadj_delay = 25, start_level = 18, target = 1100000)
 
 def GetSeed(i):
-    return (i * 1242979235)
+    return (i * 1242973851)
 
 @torch.no_grad()
 def Main():
@@ -37,7 +37,7 @@ def Main():
     model.eval()
 
     batch_size = 100
-    n = 1200
+    n = 2000
     games = [tetris.Tetris(GetSeed(i)) for i in range(batch_size)]
     for i in games: ResetGame(i)
     started = batch_size

@@ -68,7 +68,7 @@ class Tetris {
 
  private:
   // # RNG
-  std::mt19937_64 rng_;
+  std::mt19937_64 rng_, piece_rng_;
   using RealRand_ = std::uniform_real_distribution<double>;
   using NormalRand_ = std::normal_distribution<double>;
 
@@ -210,7 +210,7 @@ class Tetris {
 
   void SpawnPiece_() {
     int next = std::discrete_distribution<int>(
-        kTransitionProb_[next_piece_], kTransitionProb_[next_piece_] + kT)(rng_);
+        kTransitionProb_[next_piece_], kTransitionProb_[next_piece_] + kT)(piece_rng_);
     now_piece_ = next_piece_;
     next_piece_ = next;
   }
@@ -434,8 +434,9 @@ class Tetris {
   Position planned_placement_; // also used to store A (used as state in step 2)
   Position prev_planned_placement_;
   MoveSequence planned_seq_;
-  FrameSequence planned_fseq_;
+  FrameSequence planned_fseq_, planned_real_fseq_;
   FrameSequence real_fseq_;
+  double sampled_hz_;
   bool planned_quicktap_;
 
   // Game information after placed by A
@@ -729,6 +730,10 @@ class Tetris {
       int frames_per_drop = GetFramesPerDrop_(GetLevel_(start_level_, temp_lines_));
       planned_fseq_ = SequenceToFrame_(seq, hz_avg_ + hz_dev_ * 3, false, false,
                                        frames_per_drop);
+      double hz = NormalRand_(hz_avg_, hz_dev_)(rng_);
+      if (hz < 8) hz = 8;
+      if (hz > 30) hz = 30;
+      sampled_hz_ = hz;
       if (Simulate_(stored_mp_, planned_fseq_, frames_per_drop) != pos) {
         bool flag = false;
         if (das_) {
@@ -742,6 +747,8 @@ class Tetris {
         }
         if (!flag) reward += kInfeasibleReward_ * penalty_multiplier_;
       }
+      planned_real_fseq_ = SequenceToFrame_(seq, hz, true, planned_quicktap_,
+                                            frames_per_drop);
       reward += step_reward_;
       place_stage_ = false;
       consecutive_invalid_ = 0;
@@ -767,9 +774,7 @@ class Tetris {
     } else {
       if (!real_placement_set_) throw 1; // TODO
       FrameSequence fseq;
-      double hz = NormalRand_(hz_avg_, hz_dev_)(rng_);
-      if (hz < 8) hz = 8;
-      if (hz > 30) hz = 30;
+      double hz = sampled_hz_;
 
       bool flag = false;
       if (pos == planned_placement_) {
@@ -799,8 +804,7 @@ class Tetris {
             reward += kInfeasibleReward_ * penalty_multiplier_;
           }
         }
-        fseq = SequenceToFrame_(planned_seq_, hz, true, planned_quicktap_,
-                                frames_per_drop);
+        fseq = planned_real_fseq_;
         fseq.seq.resize(microadj_delay_);
         Position pos_before_adj =
             Simulate_(stored_mp_, fseq, frames_per_drop, false);
@@ -875,12 +879,13 @@ class Tetris {
   }
 
  public:
-  Tetris(uint64_t seed = 0) : rng_(seed) {
+  Tetris(uint64_t seed = 0) : rng_(seed), piece_rng_(seed) {
     ResetGame(18);
   }
 
   void Reseed(uint64_t seed = 0) {
     rng_.seed(seed);
+    piece_rng_.seed(seed);
   }
 
   void ResetGame(int start_level = 18, double hz_avg = 10, double hz_dev = 0,
@@ -1108,7 +1113,7 @@ class Tetris {
   }
 
   FrameSequence GetPlannedSequence(bool truncate = true) const {
-    FrameSequence fseq = planned_fseq_;
+    FrameSequence fseq = planned_real_fseq_;
     if (truncate) fseq.seq.resize(microadj_delay_, FrameInput{});
     return fseq;
   }
