@@ -11,18 +11,10 @@ from config import Configs
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def GetTorch(game):
-    return obs_to_torch(game.GetState(), device).unsqueeze(0)
-
-def GetStrat(game):
-    pi = model(GetTorch(game))[0]
-    act = torch.argmax(pi.probs, 1).item()
-    return act
-
 def ResetGame(game):
     # adjustable: reward_multiplier, hz_dev, hz_dev, microadj_delay, target, start_level
-    game.ResetGame(reward_multiplier = 1e-5, hz_avg = 13, hz_dev = 0.7,
-                   microadj_delay = 25, start_level = 18, target = 1100000)
+    game.ResetGame(reward_multiplier = 1e-5, hz_avg = 14, hz_dev = 0,
+                   microadj_delay = 15, start_level = 18, target = 1000000)
 
 def GetSeed(i):
     return (i * 1242973851)

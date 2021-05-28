@@ -108,3 +108,4 @@ class Worker:
                 target = worker_process,
                 args = (parent, name, shms, idx, seed))
         self.process.start()
+

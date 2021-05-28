@@ -716,40 +716,45 @@ class Tetris {
     return true;
   }
 
+  // needed: StoreMap_(true) (stored_mp_, stored_mp_lb_), temp_lines_
+  double SetPlannedPlacement_(const Position& pos) {
+    MoveSequence seq = GetMoveSequence_(stored_mp_, stored_mp_lb_, kStartPosition_, pos);
+    planned_placement_ = pos;
+    planned_seq_ = seq;
+    int frames_per_drop = GetFramesPerDrop_(GetLevel_(start_level_, temp_lines_));
+    planned_fseq_ = SequenceToFrame_(seq, hz_avg_ + hz_dev_ * 3, false, false,
+                                     frames_per_drop);
+    double hz = NormalRand_(hz_avg_, hz_dev_)(rng_);
+    if (hz < 8) hz = 8;
+    if (hz > 30) hz = 30;
+    sampled_hz_ = hz;
+    double reward = 0;
+    if (Simulate_(stored_mp_, planned_fseq_, frames_per_drop) != pos) {
+      bool flag = false;
+      if (das_) {
+        auto fseq = SequenceToFrame_(seq, hz_avg_ + hz_dev_ * 3, false, true,
+                                      frames_per_drop);
+        if (Simulate_(stored_mp_, fseq, frames_per_drop) == pos) {
+          planned_fseq_ = fseq;
+          flag = true;
+        }
+        planned_quicktap_ = flag;
+      }
+      if (!flag) reward += kInfeasibleReward_ * penalty_multiplier_;
+    }
+    planned_real_fseq_ = SequenceToFrame_(seq, hz, true, planned_quicktap_,
+                                          frames_per_drop);
+    return reward;
+  }
+
   Reward InputPlacement_(const Position& pos) {
     if (place_stage_) { // step 3
       if (!CheckMovePossible_(stored_mp_lb_, pos)) {
         if (++consecutive_invalid_ == 3) game_over_ = true;
         return {0, kInvalidReward_, false};
       }
-      MoveSequence seq = GetMoveSequence_(stored_mp_, stored_mp_lb_, kStartPosition_, pos);
-      double reward = 0;
       prev_planned_placement_ = planned_placement_;
-      planned_placement_ = pos;
-      planned_seq_ = seq;
-      int frames_per_drop = GetFramesPerDrop_(GetLevel_(start_level_, temp_lines_));
-      planned_fseq_ = SequenceToFrame_(seq, hz_avg_ + hz_dev_ * 3, false, false,
-                                       frames_per_drop);
-      double hz = NormalRand_(hz_avg_, hz_dev_)(rng_);
-      if (hz < 8) hz = 8;
-      if (hz > 30) hz = 30;
-      sampled_hz_ = hz;
-      if (Simulate_(stored_mp_, planned_fseq_, frames_per_drop) != pos) {
-        bool flag = false;
-        if (das_) {
-          auto fseq = SequenceToFrame_(seq, hz_avg_ + hz_dev_ * 3, false, true,
-                                       frames_per_drop);
-          if (Simulate_(stored_mp_, fseq, frames_per_drop) == pos) {
-            planned_fseq_ = fseq;
-            flag = true;
-          }
-          planned_quicktap_ = flag;
-        }
-        if (!flag) reward += kInfeasibleReward_ * penalty_multiplier_;
-      }
-      planned_real_fseq_ = SequenceToFrame_(seq, hz, true, planned_quicktap_,
-                                            frames_per_drop);
-      reward += step_reward_;
+      double reward = SetPlannedPlacement_(pos) + step_reward_;
       place_stage_ = false;
       consecutive_invalid_ = 0;
       return {reward, reward, 0};
@@ -872,7 +877,7 @@ class Tetris {
     SpawnPiece_();
     StoreMap_(false);
     game_over_ = MapEmpty_(stored_mp_lb_);
-    // prevent game going indefinitely (level 41, 120 lines after final transition)
+    // prevent game from going indefinitely (level 41, 120 lines after final transition)
     if (lines_ >= 350) game_over_ = true;
     real_placement_set_ = true;
     return true;
@@ -1174,6 +1179,39 @@ class Tetris {
     return SetRealPlacement_(pos);
   }
 
+  // Set a particular board; the next step will be step 1.
+  // If failed (returned false), the object is left in an invalid state,
+  //   and requires another successful SetState or a game reset to recover.
+  bool SetState(const Field& field, int now_piece, int next_piece,
+                const Position& planned_pos, int lines, int score, int pieces,
+                double prev_drop_time = 1000, bool prev_misdrop = false,
+                bool prev_micro = false, bool das_charged = true) {
+    temp_field_ = field;
+    temp_lines_ = lines;
+    next_piece_ = now_piece;
+    StoreMap_(true);
+    if (!CheckMovePossible_(stored_mp_lb_, planned_pos)) return false;
+    SetPlannedPlacement_(planned_pos);
+    lines_ = lines;
+    score_ = score;
+    pieces_ = pieces;
+    now_piece_ = now_piece;
+    next_piece_ = next_piece;
+    consecutive_invalid_ = 0;
+    field_ = field;
+    prev_drop_time_ = prev_drop_time;
+    prev_misdrop_ = prev_misdrop;
+    prev_micro_ = prev_micro;
+    das_charged_ = das_charged;
+    place_stage_ = false;
+    StoreMap_(false);
+    game_over_ = MapEmpty_(stored_mp_lb_);
+    if (lines_ >= 350) game_over_ = true;
+    // for stage setting only, though real_placement_ is not set (not used)
+    real_placement_set_ = true;
+    return true;
+  }
+
   // # Helpers
   using PlaceMap = std::vector<std::array<std::array<bool, kM>, kN>>;
 
@@ -1445,46 +1483,120 @@ static PyObject* Tetris_SetPreviousPlacement(Tetris* self, PyObject* args, PyObj
   return PyBool_FromLong(self->SetPreviousPlacement({rotate, x, y}));
 }
 
-static int ParsePieceID(PyObject* args, PyObject* kwds) {
-  static const char *kwlist[] = {"piece", nullptr};
-  int piece = -1;
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "i", (char**)kwlist, &piece)) {
-    PyErr_Clear();
-    Py_buffer buf{};
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "s*", (char**)kwlist, &buf)) {
-      return -2;
+static int ParsePieceID(PyObject* obj) {
+  if (PyUnicode_Check(obj)) {
+    if (PyUnicode_GET_LENGTH(obj) < 1) {
+      PyErr_SetString(PyExc_KeyError, "Invalid piece symbol.");
+      return -1;
     }
-    if (buf.len == 1) {
-      switch (((char*)buf.buf)[0]) {
-        case 'T': piece = 0; break;
-        case 'J': piece = 1; break;
-        case 'Z': piece = 2; break;
-        case 'O': piece = 3; break;
-        case 'S': piece = 4; break;
-        case 'L': piece = 5; break;
-        case 'I': piece = 6; break;
+    switch (PyUnicode_READ_CHAR(obj, 0)) {
+      case 'T': return 0;
+      case 'J': return 1;
+      case 'Z': return 2;
+      case 'O': return 3;
+      case 'S': return 4;
+      case 'L': return 5;
+      case 'I': return 6;
+      default: {
+        PyErr_SetString(PyExc_KeyError, "Invalid piece symbol.");
+        return -1;
       }
     }
-    PyBuffer_Release(&buf);
-  }
-  if (piece < 0 || piece >= 7) {
-    PyErr_SetString(PyExc_IndexError, "Invalid piece character or number");
+  } else if (PyLong_Check(obj)) {
+    long x = PyLong_AsLong(obj);
+    if (x < 0 || x >= 7) {
+      PyErr_SetString(PyExc_IndexError, "Piece ID out of range.");
+      return -1;
+    }
+    return x;
+  } else {
+    PyErr_SetString(PyExc_TypeError, "Invalid type for piece.");
     return -1;
   }
-  return piece;
 }
 
 static PyObject* Tetris_SetNowPiece(Tetris* self, PyObject* args, PyObject* kwds) {
-  int piece = ParsePieceID(args, kwds);
+  static const char *kwlist[] = {"piece", nullptr};
+  PyObject* obj;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", (char**)kwlist, &obj)) {
+    return nullptr;
+  }
+  int piece = ParsePieceID(obj);
   if (piece < 0) return nullptr;
   return PyBool_FromLong(self->SetNowPiece(piece));
 }
 
 static PyObject* Tetris_SetNextPiece(Tetris* self, PyObject* args, PyObject* kwds) {
-  int piece = ParsePieceID(args, kwds);
+  static const char *kwlist[] = {"piece", nullptr};
+  PyObject* obj;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", (char**)kwlist, &obj)) {
+    return nullptr;
+  }
+  int piece = ParsePieceID(obj);
   if (piece < 0) return nullptr;
   self->SetNextPiece(piece);
   Py_RETURN_NONE;
+}
+
+static bool ParseField(PyObject* obj, Tetris::Field& f) {
+  if (!PyList_Check(obj)) {
+    PyErr_SetString(PyExc_TypeError, "Expect List[List[int]].");
+    return false;
+  }
+  if (PyList_Size(obj) < Tetris::kN) {
+    PyErr_SetString(PyExc_IndexError, "Incorrect list size.");
+    return false;
+  }
+  for (size_t i = 0; i < Tetris::kN; i++) {
+    PyObject* row = PyList_GetItem(obj, i);
+    if (!PyList_Check(row)) {
+      PyErr_SetString(PyExc_TypeError, "Expect List[List[int]].");
+      return false;
+    }
+    if (PyList_Size(row) < Tetris::kM) {
+      PyErr_SetString(PyExc_IndexError, "Incorrect list size.");
+      return false;
+    }
+    for (size_t j = 0; j < Tetris::kM; j++) {
+      PyObject* item = PyList_GetItem(row, j);
+      if (!PyLong_Check(item)) {
+        PyErr_SetString(PyExc_TypeError, "Expect List[List[int]].");
+        return false;
+      }
+      long x = PyLong_AsLong(item);
+      f[i][j] = x != 0;
+    }
+  }
+  return true;
+}
+
+static PyObject* Tetris_SetState(Tetris* self, PyObject* args, PyObject* kwds) {
+  static const char *kwlist[] = {
+    "field", "now_piece", "next_piece", "now_rotate", "now_x", "now_y", "lines",
+    "score", "pieces", "prev_drop_time", "prev_misdrop", "prev_micro",
+    "das_charged", nullptr
+  };
+  PyObject *field_obj, *now_piece_obj, *next_piece_obj;
+  Tetris::Position pos;
+  int lines, score, pieces;
+  double prev_drop_time = 1000;
+  int prev_misdrop = 0, prev_micro = 0, das_charged = 1;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "OOOiiiiii|dppp", (char**)kwlist,
+                                   &field_obj, &now_piece_obj, &next_piece_obj,
+                                   &pos.rotate, &pos.x, &pos.y, &lines, &score,
+                                   &pieces, &prev_drop_time, &prev_misdrop,
+                                   &prev_micro, &das_charged)) {
+    return nullptr;
+  }
+  Tetris::Field f;
+  if (!ParseField(field_obj, f)) return nullptr;
+  int now_piece = ParsePieceID(now_piece_obj);
+  if (now_piece < 0) return nullptr;
+  int next_piece = ParsePieceID(next_piece_obj);
+  if (next_piece < 0) return nullptr;
+  return PyBool_FromLong(self->SetState(f, now_piece, next_piece, pos, lines,
+                                        score, pieces, prev_drop_time,
+                                        prev_misdrop, prev_micro, das_charged));
 }
 
 static PyObject* Tetris_GetState(Tetris* self, PyObject* Py_UNUSED(ignored)) {
@@ -1632,6 +1744,8 @@ static PyMethodDef py_tetris_methods[] = {
      METH_VARARGS | METH_KEYWORDS, "Set the current piece (at game start)"},
     {"SetNextPiece", (PyCFunction)Tetris_SetNextPiece,
      METH_VARARGS | METH_KEYWORDS, "Set the next piece"},
+    {"SetState", (PyCFunction)Tetris_SetState, METH_VARARGS | METH_KEYWORDS,
+     "Set the game board & state"},
 #ifdef DEBUG_METHODS
     {"PrintState", (PyCFunction)Tetris_PrintState, METH_NOARGS,
      "Print state array"},
