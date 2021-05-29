@@ -58,39 +58,50 @@ class GameConn(socketserver.BaseRequestHandler):
 
     def handle(self):
         print('connected')
-        game = tetris.Tetris(12490)
+        game = tetris.Tetris(159263)
         while True:
             try:
                 data = self.read_until(1)
                 if data[0] == 0xff:
                     cur, nxt, level = self.read_until(3)
                     # adjustable: reward_multiplier, hz_dev, hz_dev, microadj_delay, target, start_level
-                    game.ResetGame(reward_multiplier = 1e-5, hz_avg = 12, hz_dev = 0,
-                                microadj_delay = 25, start_level = level, target = 1000000)
+                    st = {'reward_multiplier': 1e-5, 'hz_avg': 12, 'hz_dev': 0, 'microadj_delay': 25, 'start_level': level, 'target': 1200000}
+                    if random.randint(0, 1) == 0:
+                        st['hz_avg'] = 13.5
+                        st['target'] = 1100000
+                    if random.randint(0, 1) == 0:
+                        st['microadj_delay'] = 16
+                    if random.randint(0, 1) == 0:
+                        st['hz_dev'] = 1
+                    game.ResetGame(**st)
+                    print()
+                    print()
+                    print('Current game:')
+                    print('Start level:', level)
+                    print('Tapping speed:', 'NormalDistribution({}, {})'.format(st['hz_avg'], st['hz_dev']) if st['hz_dev'] > 0 else 'constant {}'.format(st['hz_avg']), 'Hz')
+                    print('Microadjustment delay:', st['microadj_delay'], 'frames', flush = True)
                     game.SetNowPiece(cur)
                     game.SetNextPiece(nxt)
-                    print('start cur {} nxt {} level {}'.format(cur, nxt, level))
                     game.InputPlacement(*GetStrat(model, game), False)
                     seq = game.GetMicroadjSequence()
-                    self.print_seq(seq)
+                    # self.print_seq(seq)
                     self.request.send(self.gen_seq(seq))
                     game.InputPlacement(*GetStrat(model, game), False)
                     seq = game.GetPlannedSequence()
-                    self.print_seq(seq)
+                    # self.print_seq(seq)
                     self.request.send(self.gen_seq(seq))
                 elif data[0] == 0xfd:
                     r, x, y, nxt = self.read_until(4)
-                    print('pos ({}, {}, {}) nxt {}'.format(r, x, y, nxt))
                     game.SetPreviousPlacement(r, x, y)
                     game.SetNextPiece(nxt)
                     # game.PrintState()
                     game.InputPlacement(*GetStrat(model, game), False)
                     seq = game.GetMicroadjSequence()
-                    self.print_seq(seq)
+                    # self.print_seq(seq)
                     self.request.send(self.gen_seq(seq))
                     game.InputPlacement(*GetStrat(model, game), False)
                     seq = game.GetPlannedSequence()
-                    self.print_seq(seq)
+                    # self.print_seq(seq)
                     self.request.send(self.gen_seq(seq))
             except ConnectionResetError:
                 self.request.close()
@@ -107,7 +118,6 @@ if __name__ == "__main__":
         else: model.load_state_dict(torch.load(model_path))
         model.eval()
     # load GPU first to reduce lag
-    print('meow')
     GetStrat(model, tetris.Tetris())
 
     print('Ready')

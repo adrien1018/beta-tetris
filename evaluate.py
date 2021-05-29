@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import numpy as np, torch, sys, random, time, os.path
 from torch.distributions import Categorical
 
@@ -11,19 +12,26 @@ from config import Configs
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+reward_multiplier = 1e-5
+hz_avg = 12
+hz_dev = 0
+microadj_delay = 25
+start_level = 18
+target = 800000
+
 def ResetGame(game):
-    # adjustable: reward_multiplier, hz_dev, hz_dev, microadj_delay, target, start_level
-    game.ResetGame(reward_multiplier = 1e-5, hz_avg = 14, hz_dev = 0,
-                   microadj_delay = 15, start_level = 18, target = 1000000)
+    game.ResetGame(reward_multiplier = reward_multiplier, hz_avg = hz_avg, hz_dev = hz_dev,
+                   microadj_delay = microadj_delay, start_level = start_level, target = target)
 
 def GetSeed(i):
     return (i * 1242973851)
 
 @torch.no_grad()
-def Main():
+def Main(model_path):
     c = Configs()
     model = Model(c.channels, c.blocks).to(device)
-    model_path = os.path.join(os.path.dirname(sys.argv[0]), 'models/model.pth') if len(sys.argv) <= 1 else sys.argv[1]
+    if model_path is None:
+        model_path = os.path.join(os.path.dirname(sys.argv[0]), 'models/model.pth')
     if model_path[-3:] == 'pkl': model.load_state_dict(torch.load(model_path)[0].state_dict())
     else: model.load_state_dict(torch.load(model_path))
     model.eval()
@@ -56,7 +64,7 @@ def Main():
                     ResetGame(games[i])
                 else:
                     is_running[i] = False
-                if len(results) % 40 == 0: print(len(results))
+                if len(results) % 200 == 0: print(len(results), '/', n, 'games started')
     s = list(reversed(sorted([i[0] for i in results])))
     for i in range(len(s) - 1):
         for t in range(1500000, 700000, -50000):
@@ -66,4 +74,21 @@ def Main():
         for t in range(330, 150, -10):
             if s[i] >= t and s[i+1] < t: print(t, (i + 1) / n)
 
-if __name__ == "__main__": Main()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('model')
+    parser.add_argument('--reward-multiplier', type = float)
+    parser.add_argument('--hz-avg', type = float)
+    parser.add_argument('--hz-dev', type = float)
+    parser.add_argument('--microadj-delay', type = int)
+    parser.add_argument('--start-level', type = int)
+    parser.add_argument('--target', type = int)
+    args = parser.parse_args()
+    print(args)
+    if args.reward_multiplier is not None: reward_multiplier = args.reward_multiplier
+    if args.hz_avg is not None: hz_avg = args.hz_avg
+    if args.hz_dev is not None: hz_dev = args.hz_dev
+    if args.microadj_delay is not None: microadj_delay = args.microadj_delay
+    if args.start_level is not None: start_level = args.start_level
+    if args.target is not None: target = args.target
+    Main(args.model)
