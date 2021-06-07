@@ -67,11 +67,11 @@ def Main(model_path):
                 if len(results) % 200 == 0: print(len(results), '/', n, 'games started')
     s = list(reversed(sorted([i[0] for i in results])))
     for i in range(len(s) - 1):
-        for t in range(1500000, 700000, -50000):
+        for t in range(2000000, 700000, -50000):
             if s[i] >= t and s[i+1] < t: print(t, (i + 1) / n)
     s = list(reversed(sorted([i[1] for i in results])))
     for i in range(len(s) - 1):
-        for t in range(330, 150, -10):
+        for t in range(350, 150, -10):
             if s[i] >= t and s[i+1] < t: print(t, (i + 1) / n)
 
 if __name__ == "__main__":
