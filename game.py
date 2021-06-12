@@ -41,7 +41,7 @@ class Game:
         return self.env.GetState()
 
 def worker_process(remote: connection.Connection, name: str, shms: list, idx: slice, seed: int):
-    if idx.start == 0:
+    if idx.start == 0 and name:
         fp = open('logs/{}/{}'.format(name, os.getpid()), 'w')
         os.dup2(fp.fileno(), 1)
         save = True
