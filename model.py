@@ -8,18 +8,16 @@ from game import kH, kW
 
 # refer to Tetris::GetState for details
 kOrd = 13
-kInChannel = kOrd + 83
-kTargetId = 18
-kTargetMultiplier = 5e-6 / 5e-6 # kTargetRewardMultipler_ / GetState multiplier
+kInChannel = kOrd + 55
 
 class ConvBlock(nn.Module):
     def __init__(self, ch):
         super().__init__()
         self.main = nn.Sequential(
-                nn.Conv2d(ch, ch, 3, padding = 1),
+                nn.Conv2d(ch, ch, 5, padding = 2),
                 nn.BatchNorm2d(ch),
                 nn.ReLU(True),
-                nn.Conv2d(ch, ch, 3, padding = 1),
+                nn.Conv2d(ch, ch, 5, padding = 2),
                 nn.BatchNorm2d(ch),
                 )
         self.final = nn.ReLU(True)
@@ -30,7 +28,7 @@ class Model(nn.Module):
     def __init__(self, ch, blk):
         super().__init__()
         self.start = nn.Sequential(
-                nn.Conv2d(kInChannel, ch, 3, padding = 1),
+                nn.Conv2d(kInChannel, ch, 5, padding = 2),
                 nn.BatchNorm2d(ch),
                 nn.ReLU(True),
                 )
@@ -50,7 +48,7 @@ class Model(nn.Module):
                 nn.Linear(1 * kH * kW, 256),
                 nn.ReLU(True),
                 )
-        self.value_last = nn.Linear(256, 2)
+        self.value_last = nn.Linear(256, 1)
 
     @autocast()
     def forward(self, obs: torch.Tensor, return_categorical: bool = True):
@@ -66,11 +64,8 @@ class Model(nn.Module):
         value = self.value(x)
         with autocast(enabled = False):
             pi = pi.float()
-            pi += obs[:,5:9].view(obs.shape[0], -1) * 2
             pi[valid == 0] = -math.inf
-            value = self.value_last(value.float())
-            value_tot = value[:,0] + value[:,1] * target_mul
-            value = torch.cat((value, value_tot.unsqueeze(-1)), -1)
+            value = self.value_last(value.float()).view(-1)
             if return_categorical: pi = Categorical(logits = pi)
             return pi, value
 

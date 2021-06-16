@@ -50,7 +50,6 @@ class Tetris {
   };
   struct FrameSequence {
     std::vector<FrameInput> seq;
-    bool is_charged;
   };
   struct Position {
     int rotate, x, y;
@@ -58,10 +57,6 @@ class Tetris {
       return rotate == pos.rotate && x == pos.x && y == pos.y;
     }
     bool operator!=(const Position& pos) const { return !(*this == pos); }
-  };
-  struct Reward {
-    double score_reward, tot_reward;
-    bool target;
   };
 
   using State = std::array<std::array<std::array<float, kM>, kN>, 14>;
@@ -71,105 +66,6 @@ class Tetris {
   std::mt19937_64 rng_, piece_rng_;
   using RealRand_ = std::uniform_real_distribution<double>;
   using NormalRand_ = std::normal_distribution<double>;
-
-  // # Game state
-  int start_level_, lines_, score_, pieces_;
-  int now_piece_, next_piece_; // piece
-  bool game_over_;
-  Field field_;
-
-  static constexpr int GetLevel_(int start_level, int lines) {
-    int first = kLinesBeforeLevelUp_[start_level];
-    return lines < first ? start_level :
-        start_level + 1 + (lines - first) / 10;
-  }
-
-  // # Parameters
-  // Movement model
-  double hz_avg_, hz_dev_;
-  // The actual hz is sampled from NormalDistribution(hz_avg_, hz_dev_)
-  // Note that for default DAS we can set hz_avg_ = 10, hz_dev_ = 0
-  double first_tap_max_; // in milliseconds
-  // The actual first-tap delay is sampled from UniformDistribution(0, first_tap_max_)
-  bool das_;
-  // DAS's effect:
-  //  (1) Try to quicktap if the placement is infeasible
-  //  (2) The next piece after microadjustment / spintucks / quicktap would have
-  //      more delay (specifically, (8/3) / hz_avg_) because of unchared DAS
-
-  // For simplicity, we assume a fixed microadjustment delay (the first
-  //   microadjustment input would be done at exactly this time)
-  int microadj_delay_; // in frames
-
-  // Misdrop model
-  double orig_misdrop_rate_; // base misdrop rate
-  double misdrop_param_time_; // in milliseconds
-  double misdrop_param_pow_;
-  // The actual base misdrop rate will be
-  //   ((misdrop_param_time_ / x)^misdrop_param_pow_+1)*orig_misdrop_rate_
-  //   where x is the dropping time of the previous piece. This simulates that
-  //   it is more likely to misdrop with less thinking time.
-  //   (misdrop_param_time_ indicates the dropping time that doubles the misdrop rate)
-  // Misdrop multiplier for each misdrop types
-  //   (the multiplier will be multiplied with the base misdrop rate to get the
-  //    actual misdrop rate):
-  //   1. Missing L/R tap
-  static constexpr double kMissLRTapMultiplier_ = 0.3;
-  //   2. Missing A/B tap
-  static constexpr double kMissABTapMultiplier_ = 0.3;
-  //   3. Miss tuck
-  static constexpr double kMissTuckMultiplier_ = 1.0;
-  //   4. Miss spin
-  static constexpr double kMissSpinMultiplier_ = 2.0;
-  //   5. Miss (each) microadjustment
-  static constexpr double kMissMicroMultiplier_ = 3.0;
-  //   6. Miss quicktap
-  static constexpr double kMissQuicktapMultiplier_ = 2.0;
-  //   7. The next piece after any misdrop will have higher misdrop rate
-  static constexpr double kAfterMisdropMultiplier_ = 2.0;
-  //   8. The next piece after any microadjustment will have higher misdrop rate
-  static constexpr double kAfterMicroMultiplier_ = 1.3;
-  //   9. Spins or tucks with less input window (e.g. higher level) will have
-  //      higher misdrop rate. The actual multiplier is (3/input_window)^x,
-  //      where x is this parameter (that is, 1 on level 18 of ordinary spins).
-  //      This also give much higher misdrop probability to spintucks since it
-  //      has much lower input window.
-  static constexpr double kTuckOrSpinWindowMultiplierParam_ = 1.2;
-  // Note: The training process would try suboptimal moves, so we don't simulate
-  //   misdrops due to incorrect decision.
-  // Again, for simplicity, we fix all the multipliers here.
-  // I assigned these multipliers at my will, so some of them would differ a lot
-  //   from human behavior. A future work can be analyzing human-played games to
-  //   get a more promising misdrop model.
-
-  // Reward model
-  int target_; // in points
-  double reward_multiplier_;
-  static constexpr double kTargetRewardMultiplier_ = 5e-6;
-  // Update model.py if this multiplier changed
-  // The agent will get reward_multiplier_ reward per point before reaching the
-  //   target, and get 5e-6*target reward immediately when reaching the target; after
-  //   that, (reward_multiplier_ * 0.5) reward per point.
-  // We use this to guide the agent toward the appropriate aggression to
-  //   maximize the probability of reaching the point target.
-  static constexpr double kInvalidReward_ = -0.3;
-  // Provide a large reward deduction if the agent makes an invalid placement
-  static constexpr double kInfeasibleReward_ = -0.002;
-  // Provide a large reward deduction if the agent makes an infeasible placement
-  // "Infeasible" placements are those cannot be done by +3σ tapping speeds
-  //   (750-in-1 chance) and without misdrop
-  static constexpr double kMisdropReward_ = -0.001;
-  // Provide a small reward deduction each time the agent makes an misdrop;
-  //   this can guide the agent to avoid high-risk movements
-  double right_gain_ = 0.2;
-  // Provide a reward gain to guide the agent to use right well strategy.
-  // This can be decreased during training.
-  double penalty_multiplier_ = 1.0;
-  // Multiplier of misdrop & infeasible penalty. Set to 0 in early training to
-  //   avoid misguiding the agent.
-  double step_reward_ = 2e-5;
-  // A very small reward given to every half-rounds. Used to guide the very
-  //   early stage of training.
 
   // # Game constants
   // Piece generation probabilities
@@ -182,6 +78,16 @@ class Tetris {
     {5, 5, 5, 5, 2, 5, 5}, // S
     {6, 5, 5, 5, 5, 1, 5}, // L
     {5, 5, 5, 5, 6, 5, 1}, // I
+  };
+  static constexpr int kTransitionProbDrought_[kT][kT] = {
+  // T  J  Z  O  S  L  I (next)
+    { 3,11,14,11,11,11, 3}, // T (current)
+    {14, 3,11,11,11,11, 3}, // J
+    {11,14, 3,11,11,11, 3}, // Z
+    {11,11,11, 6,11,11, 3}, // O
+    {11,11,11,11, 6,11, 3}, // S
+    {14,11,11,11,11, 3, 3}, // L
+    {10,10,10,10,12,10, 2}, // I
   };
   // Tetraminos
   using Poly_ = std::array<std::pair<int, int>, 4>;
@@ -206,11 +112,62 @@ class Tetris {
   // 1000 / (30 * 525 / 1.001 * 455 / 2 / 2 / (341 * 262 - 0.5) * 3)
   static constexpr double kFrameLength_ = 655171. / 39375;
   static constexpr Position kStartPosition_ = {0, 0, 5}; // (r, x, y)
-  static constexpr double kDASDelayMultiplier_ = 8. / 3;
+
+  // # Game state
+  int start_level_, lines_, score_, pieces_;
+  int now_piece_, next_piece_; // piece
+  bool game_over_;
+  Field field_;
+
+  static constexpr int GetLevel_(int start_level, int lines) {
+    int first = kLinesBeforeLevelUp_[start_level];
+    return lines < first ? start_level :
+        start_level + 1 + (lines - first) / 10;
+  }
+
+  // # Statistics
+  int tetris_count_, right_tetris_count_;
+
+  // # Parameters
+  // Movement model
+  double hz_avg_, hz_dev_;
+  // The actual hz is sampled from NormalDistribution(hz_avg_, hz_dev_)
+  static constexpr double kFirstTap_ = kFrameLength_ * 0.6; // in milliseconds
+
+  // For simplicity, we assume a fixed microadjustment delay (the first
+  //   microadjustment input would be done at exactly this time)
+  int microadj_delay_; // in frames
+
+  bool drought_mode_; // whether it is in drought mode (TAOPOPYA APOPXPEY)
+
+  // Reward model
+  static constexpr double kRewardMultiplier_ = 1e-5; // 10 per maxout
+  static constexpr double kStepReward_ = 2e-5;
+  // A very small reward given to every half-rounds. Used to guide the very
+  //   early stage of training.
+  static constexpr double kInvalidReward_ = -0.3;
+  // Provide a large reward deduction if the agent makes an invalid placement
+  static constexpr double kInfeasibleReward_ = -0.004;
+  // Provide a large reward deduction if the agent makes an infeasible placement
+  // "Infeasible" placements are those cannot be done by +3σ tapping speeds
+  //   (750-in-1 chance) and without misdrop
+  static constexpr double kMisdropReward_ = -0.001;
+  // Provide a small reward deduction each time the agent makes an misdrop;
+  //   this can guide the agent to avoid high-risk movements
+  double right_gain_ = 0.2;
+  // Provide a reward gain to guide the agent to use right well strategy.
+  // This can be decreased during training.
+  double penalty_multiplier_ = 1.0;
+  // Multiplier of misdrop & infeasible penalty. Set to 0 in early training to
+  //   avoid misguiding the agent.
+  double game_over_penalty_ = 0.0;
+
 
   void SpawnPiece_() {
+    const auto probs = drought_mode_ ? kTransitionProbDrought_ :
+        kTransitionProbDrought_;
     int next = std::discrete_distribution<int>(
-        kTransitionProb_[next_piece_], kTransitionProb_[next_piece_] + kT)(piece_rng_);
+        probs[next_piece_], probs[next_piece_] + kT)(piece_rng_);
     now_piece_ = next_piece_;
     next_piece_ = next;
   }
@@ -426,7 +383,7 @@ class Tetris {
   //  Note: The first step would have empty planned placement and place_stage_ = false
 
   double prev_drop_time_; // in milliseconds
-  bool prev_misdrop_, prev_micro_, das_charged_;
+  bool prev_misdrop_, prev_micro_;
 
   bool place_stage_;
   Position real_placement_; // S in step 1
@@ -437,7 +394,6 @@ class Tetris {
   FrameSequence planned_fseq_, planned_real_fseq_;
   FrameSequence real_fseq_;
   double sampled_hz_;
-  bool planned_quicktap_;
 
   // Game information after placed by A
   Field temp_field_;
@@ -530,13 +486,10 @@ class Tetris {
     return ub;
   }
 
-  FrameSequence SequenceToFrame_(
-      const MoveSequence& seq, double hz, bool misdrop, bool quicktap,
-      int frames_per_drop, int start_row = 0,
-      const FrameSequence& prev_input = FrameSequence{}) {
-    const double start_delay = misdrop ? RealRand_(0, first_tap_max_)(rng_) : 0;
+  FrameSequence SequenceToFrame_(const MoveSequence& seq, double hz, int frames_per_drop,
+      int start_row = 0, const FrameSequence& prev_input = FrameSequence{}) {
+    const double start_delay = kFirstTap_;
     const double base_interval = 1000. / hz;
-    const bool is_micro = !prev_input.seq.empty();
     double prev_lr = -1000, prev_ab = -1000;
 
     for (size_t i = 0; i < prev_input.seq.size(); i++) {
@@ -546,25 +499,7 @@ class Tetris {
     }
     double prev = std::max(start_delay, prev_input.seq.size() * kFrameLength_);
 
-    size_t second_lr = 0, last_lr = 0, lr_count = 0;
-    size_t last_ab = 0, ab_count = 0;
-    if (das_ || misdrop) {
-      for (size_t i = 0; i < seq.moves.size(); i++) {
-        auto& mv = seq.moves[i];
-        if (mv.height_start == start_row) {
-          if (IsAB(mv.type)) {
-            ++ab_count;
-            last_ab = i;
-          } else {
-            if (++lr_count == 2) second_lr = i;
-            last_lr = i;
-          }
-        }
-      }
-    }
-
     std::vector<FrameInput> ret = prev_input.seq;
-    bool is_charged = true;
     auto Set = [&ret](size_t frame, MoveType mv) {
       if (ret.size() <= frame) ret.resize(frame + 1, FrameInput{});
       switch (mv) {
@@ -586,91 +521,16 @@ class Tetris {
         double prev_cat = IsAB(move.type) ? prev_ab : prev_lr;
         double frame_start = (move.height_start * frames_per_drop) * kFrameLength_;
         double interval = base_interval;
-        bool is_quicktap = false, is_quicktap_fast = false;
-        if (das_ && !is_micro) {
-          // Assume that microadjustments don't use DAS, and has the same speed
-          //   as charged DAS.
-          if (quicktap) {
-            // Assume that if tap count = 2, the quicktap has the same speed as
-            //   the speed of charged DAS; otherwise, perfect (2 frame) quicktap
-            //   is assumed with additional missing probability.
-            if (!das_charged_ && lr_count > 2 && i == second_lr) {
-              interval *= kDASDelayMultiplier_;
-            }
-            if (lr_count >= 2 && i == last_lr) is_quicktap = true;
-            if (lr_count > 2 && i == last_lr) {
-              interval = kFrameLength_ * 2;
-              is_quicktap_fast = true;
-            }
-          } else {
-            if (!das_charged_ && lr_count >= 2 && i == second_lr) {
-              interval *= kDASDelayMultiplier_;
-            }
-          }
-        }
         double time = std::max(std::max(lower, frame_start), prev_cat + interval);
         (IsAB(move.type) ? prev_ab : prev_lr) = time;
         prev = time;
-        if (func(i, move, is_quicktap_fast)) {
+        if (func(i, move)) {
           Set(time / kFrameLength_, move.type);
-          if (!IsAB(move.type)) {
-            // Quicktap / microadjustments uncharges DAS
-            if (is_quicktap || (is_micro && move.height_start == start_row)) {
-              is_charged = false;
-            }
-            // Tucks recharges DAS (but not spintucks that need same-height
-            //   inputs)
-            int last_start = move.height_start - (frames_per_drop == 1 ? 2 : 1);
-            if (move.height_start != start_row &&
-                (i == 0 || seq.moves[i - 1].height_start <= last_start)) {
-              is_charged = true;
-            }
-          }
         }
       }
     };
-    if (misdrop) {
-      double base_misdrop_rate = orig_misdrop_rate_ * (std::pow(
-            misdrop_param_time_ / prev_drop_time_, misdrop_param_pow_) + 1);
-      if (prev_misdrop_) base_misdrop_rate *= kAfterMisdropMultiplier_;
-      if (prev_micro_) base_misdrop_rate *= kAfterMicroMultiplier_;
-      auto window = GetInputWindow_(seq, start_row, frames_per_drop);
-      size_t start = seq.moves.size() - window.size();
-      if (is_micro) {
-        double micro_miss_rate = base_misdrop_rate * kMissMicroMultiplier_;
-        RunLoop([&](size_t i, const Move& move, bool) {
-          if (RealRand_(0, 1)(rng_) < micro_miss_rate) return false;
-          if (i >= start) {
-            double rate = base_misdrop_rate * std::pow(3. / window[i - start],
-                kTuckOrSpinWindowMultiplierParam_);
-            rate *= IsAB(move.type) ? kMissSpinMultiplier_ : kMissTuckMultiplier_;
-            if (RealRand_(0, 1)(rng_) < rate) return false;
-          }
-          return true;
-        });
-      } else {
-        double lr_miss_rate = base_misdrop_rate * kMissLRTapMultiplier_;
-        double ab_miss_rate = base_misdrop_rate * kMissABTapMultiplier_;
-        double quicktap_rate = base_misdrop_rate * kMissQuicktapMultiplier_;
-        RunLoop([&](size_t i, const Move& move, bool is_quicktap) {
-          if ((i == last_lr && RealRand_(0, 1)(rng_) < lr_miss_rate) ||
-              (i == last_ab && RealRand_(0, 1)(rng_) < ab_miss_rate) ||
-              (is_quicktap && RealRand_(0, 1)(rng_) < quicktap_rate)) {
-            return false;
-          }
-          if (i >= start) {
-            double rate = base_misdrop_rate * std::pow(3. / window[i - start],
-                kTuckOrSpinWindowMultiplierParam_);
-            rate *= IsAB(move.type) ? kMissSpinMultiplier_ : kMissTuckMultiplier_;
-            if (RealRand_(0, 1)(rng_) < rate) return false;
-          }
-          return true;
-        });
-      }
-    } else { // height_end is not used
-      RunLoop([&](size_t, const Move&, bool) { return true; });
-    }
-    return {ret, is_charged};
+    RunLoop([&](size_t, const Move&) { return true; });
+    return {ret};
   }
 
   static Position Simulate_(const Map_& mp, const FrameSequence& seq, int frames_per_drop, bool finish = true) {
@@ -722,47 +582,35 @@ class Tetris {
     planned_placement_ = pos;
     planned_seq_ = seq;
     int frames_per_drop = GetFramesPerDrop_(GetLevel_(start_level_, temp_lines_));
-    planned_fseq_ = SequenceToFrame_(seq, hz_avg_ + hz_dev_ * 3, false, false,
-                                     frames_per_drop);
+    planned_fseq_ = SequenceToFrame_(seq, hz_avg_ + hz_dev_ * 3, frames_per_drop);
     double hz = NormalRand_(hz_avg_, hz_dev_)(rng_);
     if (hz < 8) hz = 8;
     if (hz > 30) hz = 30;
     sampled_hz_ = hz;
     double reward = 0;
     if (Simulate_(stored_mp_, planned_fseq_, frames_per_drop) != pos) {
-      bool flag = false;
-      if (das_) {
-        auto fseq = SequenceToFrame_(seq, hz_avg_ + hz_dev_ * 3, false, true,
-                                      frames_per_drop);
-        if (Simulate_(stored_mp_, fseq, frames_per_drop) == pos) {
-          planned_fseq_ = fseq;
-          flag = true;
-        }
-        planned_quicktap_ = flag;
-      }
-      if (!flag) reward += kInfeasibleReward_ * penalty_multiplier_;
+      reward += kInfeasibleReward_ * penalty_multiplier_;
     }
-    planned_real_fseq_ = SequenceToFrame_(seq, hz, true, planned_quicktap_,
-                                          frames_per_drop);
+    planned_real_fseq_ = SequenceToFrame_(seq, hz, frames_per_drop);
     return reward;
   }
 
-  Reward InputPlacement_(const Position& pos) {
+  double InputPlacement_(const Position& pos) {
     if (place_stage_) { // step 3
       if (!CheckMovePossible_(stored_mp_lb_, pos)) {
         if (++consecutive_invalid_ == 3) game_over_ = true;
-        return {0, kInvalidReward_, false};
+        return kInvalidReward_;
       }
       prev_planned_placement_ = planned_placement_;
-      double reward = SetPlannedPlacement_(pos) + step_reward_;
+      double reward = SetPlannedPlacement_(pos) + kStepReward_;
       place_stage_ = false;
       consecutive_invalid_ = 0;
-      return {reward, reward, 0};
+      return reward;
     }
     // step 1
     if (!CheckMovePossible_(stored_mp_lb_, pos)) {
       if (++consecutive_invalid_ == 3) game_over_ = true;
-      return {kInvalidReward_, 0, 0};
+      return kInvalidReward_;
     }
     double reward = 0;
     int level = GetLevel_(start_level_, lines_);
@@ -772,10 +620,9 @@ class Tetris {
       real_placement_ = pos;
       prev_misdrop_ = false;
       prev_micro_ = false;
-      das_charged_ = true; // we can make it charged anyway
       MoveSequence cur_seq =
           GetMoveSequence_(stored_mp_, stored_mp_lb_, kStartPosition_, pos);
-      real_fseq_ = SequenceToFrame_(cur_seq, hz_avg_, true, false, frames_per_drop);
+      real_fseq_ = SequenceToFrame_(cur_seq, hz_avg_, frames_per_drop);
     } else {
       if (!real_placement_set_) throw 1; // TODO
       FrameSequence fseq;
@@ -786,8 +633,7 @@ class Tetris {
         MoveSequence cur_seq =
             GetMoveSequence_(stored_mp_, stored_mp_lb_, kStartPosition_, pos);
         if (SequenceEquivalent_(cur_seq, planned_seq_)) { // no micro
-          fseq = SequenceToFrame_(cur_seq, hz, true, planned_quicktap_,
-                                  frames_per_drop);
+          fseq = SequenceToFrame_(cur_seq, hz, frames_per_drop);
           flag = true;
         }
       }
@@ -799,9 +645,8 @@ class Tetris {
           Map_ tmp_mp = Dijkstra_(stored_mp_, pos_before_adj);
           MoveSequence seq = GetMoveSequenceLb_(tmp_mp, pos);
           if (seq.valid) {
-            fseq = SequenceToFrame_(seq, hz_avg_ + 3 * hz_dev_, false, false,
-                                    frames_per_drop, pos_before_adj.x,
-                                    planned_fseq_);
+            fseq = SequenceToFrame_(seq, hz_avg_ + 3 * hz_dev_, frames_per_drop,
+                                    pos_before_adj.x, planned_fseq_);
             if (Simulate_(stored_mp_, fseq, frames_per_drop) != pos) {
               reward += kInfeasibleReward_ * penalty_multiplier_;
             }
@@ -817,7 +662,7 @@ class Tetris {
             GetMoveSequence_(stored_mp_, Dijkstra_(stored_mp_, pos_before_adj),
                              pos_before_adj, pos);
         if (seq.valid) {
-          fseq = SequenceToFrame_(seq, hz, true, false, frames_per_drop,
+          fseq = SequenceToFrame_(seq, hz, frames_per_drop,
                                   pos_before_adj.x, fseq);
         }
       }
@@ -825,7 +670,6 @@ class Tetris {
       prev_misdrop_ = real_placement_ != pos;
       if (prev_misdrop_) reward += kMisdropReward_ * penalty_multiplier_;
       prev_micro_ = !flag;
-      das_charged_ = fseq.is_charged;
       real_fseq_ = std::move(fseq);
     }
     planned_placement_ = pos;
@@ -835,33 +679,20 @@ class Tetris {
     temp_score_ = score_ + GetScore_(planned_lines, level);
     Field field(field_);
     int real_lines = PlaceField(field, now_piece_, real_placement_);
-    int orig_score = score_;
     int score_delta = GetScore_(real_lines, level);
-    int new_score = score_ + score_delta;
     prev_drop_time_ = GetDropTime_(now_piece_, real_placement_, frames_per_drop,
                                    real_lines > 0);
     pieces_++;
-    double score_reward = 0;
-    bool is_target = false;
-    double target_reward = 0;
-    if (orig_score >= target_) {
-      score_reward = (reward_multiplier_ * 0.5) * score_delta;
-    } else if (new_score < target_) {
-      score_reward = reward_multiplier_ * score_delta;
-    } else {
-      score_reward = reward_multiplier_ * (target_ - orig_score);
-      score_reward += (reward_multiplier_ * 0.5) * (new_score - target_);
-      is_target = true;
-      target_reward = target_ * kTargetRewardMultiplier_;
-    }
+    double score_reward = kRewardMultiplier_ * score_delta;
     if (pos.y == 9) score_reward *= 1 + right_gain_;
-    reward += score_reward + step_reward_;
+    reward += score_reward + kStepReward_;
     real_placement_set_ = false;
     place_stage_ = true;
     consecutive_invalid_ = 0;
     StoreMap_(true);
     game_over_ = MapEmpty_(stored_mp_lb_);
-    return {reward, reward + target_reward, is_target};
+    if (game_over_) reward += game_over_penalty_;
+    return reward;
   }
 
   bool real_placement_set_;
@@ -872,13 +703,17 @@ class Tetris {
     real_placement_ = pos;
     int real_lines = PlaceField(field_, now_piece_, real_placement_);
     int level = GetLevel_(start_level_, lines_);
+    if (real_lines == 4) {
+      tetris_count_++;
+      if (pos.y == 9) right_tetris_count_++;
+    }
     lines_ += real_lines;
     score_ += GetScore_(real_lines, level);
     SpawnPiece_();
     StoreMap_(false);
     game_over_ = MapEmpty_(stored_mp_lb_);
-    // prevent game from going indefinitely (level 41, 120 lines after final transition)
-    if (lines_ >= 350) game_over_ = true;
+    // prevent game from going indefinitely
+    if (lines_ >= 330 || (start_level_ == 29 && lines_ >= 230)) game_over_ = true;
     real_placement_set_ = true;
     return true;
   }
@@ -893,111 +728,73 @@ class Tetris {
     piece_rng_.seed(seed);
   }
 
-  void ResetGame(int start_level = 18, double hz_avg = 10, double hz_dev = 0,
-                 bool das = true, double first_tap_max = 30,
-                 int microadj_delay = 40, double orig_misdrop_rate = 5e-3,
-                 double misdrop_param_time = 400,
-                 double misdrop_param_pow = 1.0, int target = 1000000,
-                 double reward_multiplier = 2e-6, double right_gain = 0.2,
-                 double penalty_multiplier = 1.0, double step_reward = 0.) {
+  void ResetGame(int start_level = 18, double hz_avg = 12, double hz_dev = 0,
+                 int microadj_delay = 40, int start_lines = 0, bool drought_mode = false,
+                 double game_over_penalty = 0, double right_gain = 0.2,
+                 double penalty_multiplier = 1.0) {
     start_level_ = start_level;
-    lines_ = 0;
+    lines_ = start_lines;
     score_ = 0;
     next_piece_ = 0;
-    pieces_ = 0;
+    pieces_ = start_lines * 10 / 4;
     game_over_ = false;
     SpawnPiece_();
     SpawnPiece_();
     consecutive_invalid_ = 0;
     for (auto& i : field_) std::fill(i.begin(), i.end(), false);
-    reward_multiplier_ = reward_multiplier;
+    drought_mode_ = drought_mode;
+    game_over_penalty_ = game_over_penalty;
     right_gain_ = right_gain;
     penalty_multiplier_ = penalty_multiplier;
-    step_reward_ = step_reward;
     hz_avg_ = hz_avg;
     hz_dev_ = hz_dev;
-    das_ = das;
-    first_tap_max_ = first_tap_max;
     microadj_delay_ = microadj_delay;
-    orig_misdrop_rate_ = orig_misdrop_rate;
-    misdrop_param_time_ = misdrop_param_time;
-    misdrop_param_pow_ = misdrop_param_pow;
     prev_drop_time_ = 1800;
     prev_misdrop_ = false;
     prev_micro_ = false;
-    das_charged_ = false;
-    target_ = target;
     place_stage_ = false;
     planned_seq_.valid = false;
     real_placement_set_ = false;
-    planned_quicktap_ = false;
+    tetris_count_ = 0;
+    right_tetris_count_ = 0;
     StoreMap_(false);
   }
 
-  void ResetRandom(double fix_prob, double right_gain, double penalty_multiplier, double step_reward) {
+  void ResetRandom(double right_gain, double penalty_multiplier) {
     using IntRand = std::uniform_int_distribution<int>;
-    using GammaRand = std::gamma_distribution<double>;
-    auto Padded = [&](auto&& dist, double uniform_ratio, double l, double r) {
-      if (RealRand_(0, 1)(rng_) < uniform_ratio) {
-        return RealRand_(l, r)(rng_);
-      } else {
-        double val = dist(rng_);
-        if (val < l) val = l;
-        if (val > r) val = r;
-        return val;
+    constexpr double hz_table[] = {12, 13.5, 15, 20, 30};
+    constexpr double start_level_table[] = {18, 19, 29};
+    constexpr int adj_delay_table[] = {8, 16, 21, 25, 61};
+    constexpr double penalty_table[] = {0, -0.1, -1.0};
+    int hz_ind = IntRand(0, 4)(rng_);
+    int start_level = start_level_table[IntRand(0, 2)(rng_)];
+    double hz_avg = hz_table[hz_ind];
+    double hz_dev = IntRand(0, 2)(rng_) ? 0 : 1;
+    int microadj_delay = adj_delay_table[IntRand(0, 4)(rng_)];
+    double game_over_penalty = penalty_table[IntRand(0, 2)(rng_)];
+    int start_lines = 0;
+    bool drought_mode = IntRand(0, 2)(rng_) == 0;
+    // pre-transition training
+    int rnd = IntRand(0, 19)(rng_), rnd2 = IntRand(0, 3)(rng_);
+    if (start_level == 18) {
+      if (rnd >= 18) {
+        start_lines = 305 + rnd2; // 330-25
+      } else if (rnd >= 15) {
+        start_lines = 205 + rnd2; // 230-25
+      } else if (rnd >= 10) {
+        start_lines = 105 + rnd2; // 130-25
       }
-    };
-    double s_param = RealRand_(0, 1)(rng_); // strength parameter
-    int start_level = IntRand(18, 19)(rng_);
-    bool das = false;
-    double hz_avg = Padded(NormalRand_(11 + 7 * s_param, 3), 0.3, 9, 15 + 15 * s_param);
-    double hz_dev = Padded(GammaRand(2.5, (hz_avg / (6 + s_param * 4)) * 0.15),
-                           0.2, 0, hz_avg / (6 + s_param * 4));
-    /*
-    if (RealRand_(0, 1)(rng_) < 0.3) {
-      das = true;
-      hz_dev = 0;
-      if (RealRand_(0, 1)(rng_) < 0.8) hz_avg = 10;
-    }
-    double first_tap_max = Padded(NormalRand_(30 - s_param * 20, 4), 0.25, 0, 50 - s_param * 30);
-    int microadj_delay = Padded(NormalRand_(40 - s_param * 20, 5), 0.25, 0, 60 - s_param * 20);
-    double orig_misdrop_rate = RealRand_(0, 1)(rng_) < 0.1 ? 0 :
-        std::exp(Padded(NormalRand_(-4.5 - s_param, 1), 0.2, -6 - s_param * 4, -3 - s_param));
-    double misdrop_param_time = Padded(NormalRand_(400, 100) , 0.6, 200, 700);
-    double misdrop_param_pow = RealRand_(0.7, 1.8)(rng_);
-    int target = Padded(NormalRand_(1.05e+6, 1.5e+5), 0.4, 1e+3, 1.5e+6);
-    double reward_multiplier = RealRand_(0, 1)(rng_) < 0.1 ? 0 :
-        Padded(GammaRand(0.5, 5e-7), 0.3, 0, 1e-5);
-    if (RealRand_(0, 1)(rng_) < fix_prob) {
-      if (RealRand_(0, 1)(rng_) < 0.6) {
-        hz_avg = das ? 10 : 14;
-        hz_dev = das ? 0 : 1;
+    } else if (start_level == 19) {
+      if (rnd >= 17) {
+        start_lines = 305 + rnd2;
+      } else if (rnd >= 10) {
+        start_lines = 205 + rnd2;
       }
-      first_tap_max = 20;
-      microadj_delay = 30;
-      orig_misdrop_rate = std::exp(-7);
-      misdrop_param_time = 400;
-      misdrop_param_pow = 1;
-      reward_multiplier = 1e-5;
-    }*/
-    double first_tap_max = 0;
-    int microadj_delay = Padded(NormalRand_(30 - s_param * 10, 10), 0.35, 0, 50 - s_param * 20);
-    double orig_misdrop_rate = 0;
-    double misdrop_param_time = 400; // arbitrary
-    double misdrop_param_pow = 1; // arbitrary
-    double reward_multiplier = RealRand_(0, 1)(rng_) < 0.2 ? 0 :
-        Padded(GammaRand(0.6, 2e-6), 0.3, 0, 1e-5);
-    int target = Padded(NormalRand_(1.1e+6, 1.5e+5), 0.2, 1e+3, 1.5e+6);
-    if (RealRand_(0, 1)(rng_) < fix_prob) {
-      if (RealRand_(0, 1)(rng_) < 0.8) hz_avg = 12;
-      if (RealRand_(0, 1)(rng_) < 0.8) target = IntRand(1000, 1400000)(rng_);
-      reward_multiplier = 1e-5;
-      hz_dev = 0;
-      microadj_delay = 25;
+    } else if (start_level == 29) {
+      if (rnd >= 14) start_lines = 205 + rnd2;
     }
-    ResetGame(start_level, hz_avg, hz_dev, das, first_tap_max, microadj_delay,
-              orig_misdrop_rate, misdrop_param_time, misdrop_param_pow, target,
-              reward_multiplier, right_gain, penalty_multiplier, step_reward);
+    ResetGame(start_level, hz_avg, hz_dev, microadj_delay, start_lines,
+              drought_mode, game_over_penalty, right_gain, penalty_multiplier);
   }
 
   static int PlaceField(Field& field, int piece, const Position& pos) {
@@ -1062,58 +859,73 @@ class Tetris {
     misc[0 + (place_stage_ ? next_piece_ : now_piece_)] = 1;
     // 7-14: next / 7(if place_stage_)
     misc[place_stage_ ? 14 : 7 + next_piece_] = 1;
-    // 15-16: start (18 or 19)
-    misc[start_level_ == 19 ? 15 : 16] = 1;
-    // 17: score
-    misc[17] = (place_stage_ ? temp_score_ : score_) * 5e-6;
-    // 18: target
-    // Update model.py if this multiplier changed
-    misc[18] = target_ * 5e-6;
-    // 19: reward_multiplier
-    misc[19] = reward_multiplier_ * 2e+5;
-    // 20: level
+    // 15-17: start (18/19/29)
+    misc[start_level_ != 29 ? start_level_ == 18 ? 15 : 16 : 17] = 1;
+    // 18: level
     int lines = place_stage_ ? temp_lines_ : lines_;
     int level = GetLevel_(start_level_, lines);
-    misc[20] = level * 1e-1;
-    // 21: lines
-    misc[21] = lines * 2e-2;
-    // 22: pieces
-    misc[22] = pieces_ * 2.5e-3;
-    // 23-25: speed
-    misc[23 + (GetFramesPerDrop_(level) - 1)] = 1;
-    // 26-73: lines to next speed
-    //   26: level 29+
-    //   27-36: 1-10
-    //   37-46: 11-30 (2)
-    //   47-60: 31-100 (5)
-    //   61-73: 101-230 (10)
-    if (level >= 29) {
-      misc[26] = 1;
+    misc[18] = level * 1e-1;
+    // 19: lines
+    misc[19] = lines * 2e-2;
+    // 20: pieces
+    misc[20] = pieces_ * 8e-3;
+    // 21-23: speed (29/19/18)
+    misc[20 + (GetFramesPerDrop_(level) - 1)] = 1;
+    // 24: drought
+    misc[24] = drought_mode_;
+    // 25: board
+    misc[25] = 1;
+    // 26-39: lines to next speed / final
+    //   26-35: 1-10
+    //   36-38: 11-19 (3)
+    //   39: 20~ (5)
+    int lines_to_next = level >= 29 ?
+        (start_level_ == 29 ? 230 - lines : 330 - lines) :
+        (level == 18 ? 130 - lines : 230 - lines);
+    if (lines_to_next <= 10) {
+      misc[26 + (lines_to_next - 1)] = 1;
+    } else if (lines_to_next <= 19) {
+      misc[36 + (lines_to_next - 11) / 3] = 1;
     } else {
-      int lines_to_next = level == 18 ? 130 - lines : 230 - lines;
-      if (lines_to_next <= 10) {
-        misc[27 + (lines_to_next - 1)] = 1;
-      } else if (lines_to_next <= 30) {
-        misc[37 + (lines_to_next - 11) / 2] = 1;
-      } else if (lines_to_next <= 100) {
-        misc[47 + (lines_to_next - 31) / 5] = 1;
-      } else {
-        misc[61 + (lines_to_next - 101) / 10] = 1;
-      }
+      misc[39] = 1;
     }
-    // 74-78: hz_avg, hz_dev, first_tap_max, das, microadj_delay
-    misc[74] = hz_avg_ / 5;
-    misc[75] = hz_dev_ / 5;
-    misc[76] = first_tap_max_ * 1e-2; // currently constant
-    misc[77] = das_; //
-    misc[78] = microadj_delay_ * 1e-1;
-    // 79-81: orig_misdrop_rate, misdrop_param_time, misdrop_param_pow
-    misc[79] = std::max(-12., std::log(orig_misdrop_rate_ + 1e-12)) / 5; //
-    misc[80] = misdrop_param_time_ * 1e-3; //
-    misc[81] = misdrop_param_pow_; //
-    // 82: prev_misdrop
-    misc[82] = !place_stage_ && prev_misdrop_;
-    // 13 + 83 = 96 (channels)
+    // 40-44: hz_avg
+    if (hz_avg_ >= 25) {
+      misc[40] = 1; // 30
+    } else if (hz_avg_ >= 18) {
+      misc[41] = 1; // 20
+    } else if (hz_avg_ >= 14) {
+      misc[42] = 1; // 15
+    } else if (hz_avg_ >= 13) {
+      misc[43] = 1; // 13.5
+    } else {
+      misc[44] = 1; // 12
+    }
+    // 45: hz_dev
+    misc[45] = hz_dev_;
+    // 46-50: microadj_delay
+    if (microadj_delay_ >= 50) {
+      misc[46] = 1; // 61
+    } else if (microadj_delay_ >= 23) {
+      misc[47] = 1; // 25
+    } else if (microadj_delay_ >= 20) {
+      misc[48] = 1; // 21
+    } else if (microadj_delay_ >= 14) {
+      misc[49] = 1; // 16
+    } else {
+      misc[50] = 1; // 8
+    }
+    // 51-53: game_over_penalty
+    if (game_over_penalty_ >= -0.001) {
+      misc[51] = 1; // 0
+    } else if (game_over_penalty_ >= -0.5) {
+      misc[52] = 1; // 0.1
+    } else {
+      misc[53] = 1; // 1
+    }
+    // 54: prev_misdrop
+    misc[54] = !place_stage_ && prev_misdrop_;
+    // 13 + 55 = 68 (channels)
     return ret;
   }
 
@@ -1135,13 +947,13 @@ class Tetris {
     return fseq;
   }
 
-  Reward InputPlacement(const Position& pos, bool training = true) {
-    if (game_over_) return {0, 0, 0};
+  double InputPlacement(const Position& pos, bool training = true) {
+    if (game_over_) return 0;
     bool orig_stage = place_stage_;
     if (pos.rotate >= (int)stored_mp_lb_.size() || pos.x >= kN || pos.y >= kM) {
-      return {kInvalidReward_, 0, 0};
+      return kInvalidReward_;
     }
-    Reward ret = InputPlacement_(pos);
+    double ret = InputPlacement_(pos);
     if (training && orig_stage && !place_stage_) TrainingSetPlacement();
     return ret;
   }
@@ -1185,7 +997,7 @@ class Tetris {
   bool SetState(const Field& field, int now_piece, int next_piece,
                 const Position& planned_pos, int lines, int score, int pieces,
                 double prev_drop_time = 1000, bool prev_misdrop = false,
-                bool prev_micro = false, bool das_charged = true) {
+                bool prev_micro = false) {
     temp_field_ = field;
     temp_lines_ = lines;
     next_piece_ = now_piece;
@@ -1202,11 +1014,10 @@ class Tetris {
     prev_drop_time_ = prev_drop_time;
     prev_misdrop_ = prev_misdrop;
     prev_micro_ = prev_micro;
-    das_charged_ = das_charged;
     place_stage_ = false;
     StoreMap_(false);
     game_over_ = MapEmpty_(stored_mp_lb_);
-    if (lines_ >= 350) game_over_ = true;
+    if (lines_ >= 330 || (start_level_ == 29 && lines_ >= 230)) game_over_ = true;
     // for stage setting only, though real_placement_ is not set (not used)
     real_placement_set_ = true;
     return true;
@@ -1278,7 +1089,6 @@ private:
     putchar('\n');
   }
   static void Print(const FrameSequence& seq) {
-    printf("(charged:%d)", (int)seq.is_charged);
     for (auto& i : seq.seq) {
       std::string str;
       if (i.l) str += 'L';
@@ -1302,14 +1112,12 @@ public:
     puts("Field:");
     Print(field_);
     printf("Place stage: %d\n", (int)place_stage_);
-    printf("Prev drop time: %f ms, prev misdrop: %d, prev micro: %d, das charged %d\n",
-           prev_drop_time_, (int)prev_misdrop_, (int)prev_micro_,
-           (int)das_charged_);
+    printf("Prev drop time: %f ms, prev misdrop: %d, prev micro: %d\n",
+           prev_drop_time_, (int)prev_misdrop_, (int)prev_micro_);
     printf("Real placement: "); Print(real_placement_);
     printf("\nPlanned placement: "); Print(planned_placement_);
     printf("\nPlanned sequence: "); Print(planned_seq_);
     printf("Planned frame sequence: "); Print(planned_fseq_);
-    printf("Planned quicktap: %d\n", (int)planned_quicktap_);
     puts("Temp:");
     printf("Lines: %d, score: %d, field:\n", temp_lines_, temp_score_);
     Print(temp_field_);
@@ -1317,13 +1125,8 @@ public:
     Print(stored_mp_lb_);
     printf("Consecutive invalid: %d\n", consecutive_invalid_);
     puts("Parameters:");
-    printf("Target: %d, reward multiplier: %e\n", target_, reward_multiplier_);
-    printf("Hz: avg %f dev %f, first tap max: %f, das: %d\n", hz_avg_, hz_dev_,
-           first_tap_max_, das_);
-    printf("Microadj delay: %d, misdrop rate: %e\n", microadj_delay_,
-           orig_misdrop_rate_);
-    printf("Misdrop param: time %f, pow %f\n", misdrop_param_time_,
-           misdrop_param_pow_);
+    printf("Hz: avg %f dev %f, micro delay: %d\n", hz_avg_, hz_dev_, microadj_delay_);
+    printf("Penal: %f, drought: %d\n", game_over_penalty_, (int)drought_mode_);
     puts("");
     fflush(stdout);
   }
@@ -1364,19 +1167,21 @@ public:
     puts("");
     for (int i = 7; i < 15; i++) printf("%d ", (int)misc[i]);
     puts("");
-    printf("%6s %6s %6s %6s %6s %6s %6s %6s %6s %6s %6s\n",
-        "s19", "s18", "sc", "tg", "rmul", "lev", "ln", "pcs", "sp29", "sp19", "sp18");
-    for (int i = 15; i < 26; i++) printf("%6.3f ", misc[i]);
+    printf("%6s %6s %6s %6s %6s %6s %6s %6s %6s %6s\n",
+        "s18", "s19", "s29", "lev", "ln", "pcs", "sp29", "sp19", "sp18", "dro");
+    for (int i = 15; i < 25; i++) printf("%6.3f ", misc[i]);
     puts("");
-    constexpr int arr[] = {29,1,2,3,4,5,6,7,8,9,10,12,14,16,18,20,22,24,26,28,30,35,40,45,50,55,60,65,70,75,80,85,90,95,10,11,12,13,14,15,16,17,18,19,20,21,22,23};
-    for (int i = 0; i < 48; i++) printf("%2d", arr[i]);
+    constexpr int arr[] = {1,2,3,4,5,6,7,8,9,10,13,16,19,99};
+    for (int i = 0; i < 14; i++) printf("%2d", arr[i]);
     puts("");
-    for (int i = 26; i < 74; i++) printf("%d ", (int)misc[i]);
-    puts("");
-    printf("%6s %6s %6s %6s %6s %6s %6s %6s %6s\n",
-        "hzavg", "hzdev", "ftap", "das", "micdl", "misr", "mist", "misp", "prvmis");
-    for (int i = 74; i < 83; i++) printf("%6.3f ", misc[i]);
-    puts("");
+    for (int i = 26; i < 40; i++) printf("%d ", (int)misc[i]);
+    printf("\nhzavg 30 20 15 13 12\n     ");
+    for (int i = 40; i < 45; i++) printf("  %d", (int)misc[i]);
+    printf("\nhzdev %.2f\nmicdl 61 25 20 16 8\n     ", misc[45]);
+    for (int i = 46; i < 51; i++) printf("  %d", (int)misc[i]);
+    printf("\npenal  0  1 10\n     ");
+    for (int i = 51; i < 54; i++) printf("  %d", (int)misc[i]);
+    printf("\nprvmis %.1f\n", misc[54]);
     fflush(stdout);
   }
 #endif
@@ -1405,6 +1210,7 @@ decltype(Tetris::kBlocks_) Tetris::kBlocks_ = {
 #ifndef _MSC_VER
 #define TETRIS_DEFINE_STATIC(x) decltype(Tetris::x) Tetris::x
 TETRIS_DEFINE_STATIC(kTransitionProb_);
+TETRIS_DEFINE_STATIC(kTransitionProbDrought_);
 TETRIS_DEFINE_STATIC(kStartPosition_);
 TETRIS_DEFINE_STATIC(kLinesBeforeLevelUp_);
 TETRIS_DEFINE_STATIC(kFramesPerDrop_);
@@ -1801,12 +1607,12 @@ int main() {
       case 'p': t.PrintAllState(); break;
       case 'f': t.PrintState(true); break;
       case 's': t.PrintState(); break;
-      case 'r': t.ResetRandom(0.3, 0.0, 0.0, 1e-5); break;
+      case 'r': t.ResetRandom(0.3, 0.0); break;
       case 'i': {
         int r, x, y;
         scanf("%d %d %d", &r, &x, &y);
-        Tetris::Reward rr = t.InputPlacement({r, x, y});
-        printf("Reward: %f %f %d\n", rr.score_reward, rr.tot_reward, (int)rr.target);
+        double rr = t.InputPlacement({r, x, y});
+        printf("Reward: %f\n", rr);
         break;
       }
     }

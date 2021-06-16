@@ -31,9 +31,7 @@ class Configs(BaseConfigs):
     reg_l2: float = FloatDynamicHyperParam(0., range_ = (0, 5e-5))
 
     right_gain: float = FloatDynamicHyperParam(0.501, range_ = (0, 1))
-    fix_prob: float = FloatDynamicHyperParam(1., range_ = (0, 1))
     neg_mul: float = FloatDynamicHyperParam(0., range_ = (0, 1))
-    step_reward: float = FloatDynamicHyperParam(2e-5, range_ = (0, 2e-5))
 
 def LoadConfig(with_experiment = True):
     parser = argparse.ArgumentParser()
