@@ -1,4 +1,4 @@
-import argparse
+import os, argparse
 
 from labml import experiment
 from labml.configs import BaseConfigs, FloatDynamicHyperParam
@@ -7,30 +7,29 @@ class Configs(BaseConfigs):
     # #### Configurations
     # $\gamma$ and $\lambda$ for advantage calculation
     gamma: float = FloatDynamicHyperParam(0.99, range_ = (0.98, 1))
-    lamda: float = FloatDynamicHyperParam(0.95, range_ = (0.9, 1))
+    lamda: float = FloatDynamicHyperParam(0.94, range_ = (0.9, 1))
     # number of updates
     updates: int = 100000
     # number of epochs to train the model with sampled data
     epochs: int = 1
     # number of worker processes
-    n_workers: int = 16
-    env_per_worker: int = 8
+    n_workers: int = 32
+    env_per_worker: int = 4
     # number of steps to run on each process for a single update
     worker_steps: int = 256
     # size of mini batches
     n_update_per_epoch: int = 32
     mini_batch_size: int = 512
-    channels: int = 160
-    blocks: int = 10
+    channels: int = 128
+    blocks: int = 8
     lr: float = FloatDynamicHyperParam(1e-4, range_ = (0, 1e-3))
     clipping_range: float = 0.2
     vf_weight: float = 0.5
-    target_prob_weight: float = FloatDynamicHyperParam(0.8, range_ = (0, 2))
     entropy_weight: float = FloatDynamicHyperParam(3e-2, range_ = (0, 5e-2))
-    prob_reg_weight: float = FloatDynamicHyperParam(2e-4, range_ = (0, 1e-2))
     reg_l2: float = FloatDynamicHyperParam(0., range_ = (0, 5e-5))
 
-    right_gain: float = FloatDynamicHyperParam(0.501, range_ = (0, 1))
+    pre_trans: float = FloatDynamicHyperParam(1., range_ = (0, 1))
+    right_gain: float = FloatDynamicHyperParam(0.28473, range_ = (0, 1))
     neg_mul: float = FloatDynamicHyperParam(0., range_ = (0, 1))
 
 def LoadConfig(with_experiment = True):
@@ -70,4 +69,4 @@ def LoadConfig(with_experiment = True):
     else:
         for key, val in override_dict:
             conf.__setattr__(key, val)
-    return conf, others
+    return conf, args, others

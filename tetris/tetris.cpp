@@ -137,7 +137,7 @@ class Tetris {
   // For simplicity, we assume a fixed microadjustment delay (the first
   //   microadjustment input would be done at exactly this time)
   int microadj_delay_; // in frames
-
+  int start_lines_;
   bool drought_mode_; // whether it is in drought mode (TAOPOPYA APOPXPEY)
 
   // Reward model
@@ -691,7 +691,7 @@ class Tetris {
     consecutive_invalid_ = 0;
     StoreMap_(true);
     game_over_ = MapEmpty_(stored_mp_lb_);
-    if (game_over_) reward += game_over_penalty_;
+    if (game_over_) reward += game_over_penalty_ * penalty_multiplier_;
     return reward;
   }
 
@@ -713,7 +713,7 @@ class Tetris {
     StoreMap_(false);
     game_over_ = MapEmpty_(stored_mp_lb_);
     // prevent game from going indefinitely
-    if (lines_ >= 330 || (start_level_ == 29 && lines_ >= 230)) game_over_ = true;
+    if (lines_ >= 330 || ((start_level_ == 29 || drought_mode_) && lines_ >= 230)) game_over_ = true;
     real_placement_set_ = true;
     return true;
   }
@@ -734,6 +734,7 @@ class Tetris {
                  double penalty_multiplier = 1.0) {
     start_level_ = start_level;
     lines_ = start_lines;
+    start_lines_ = start_lines;
     score_ = 0;
     next_piece_ = 0;
     pieces_ = start_lines * 10 / 4;
@@ -760,8 +761,9 @@ class Tetris {
     StoreMap_(false);
   }
 
-  void ResetRandom(double right_gain, double penalty_multiplier) {
+  void ResetRandom(float pre_trans, double right_gain, double penalty_multiplier) {
     using IntRand = std::uniform_int_distribution<int>;
+    using RealRand = std::uniform_real_distribution<float>;
     constexpr double hz_table[] = {12, 13.5, 15, 20, 30};
     constexpr double start_level_table[] = {18, 19, 29};
     constexpr int adj_delay_table[] = {8, 16, 21, 25, 61};
@@ -774,24 +776,45 @@ class Tetris {
     double game_over_penalty = penalty_table[IntRand(0, 2)(rng_)];
     int start_lines = 0;
     bool drought_mode = IntRand(0, 2)(rng_) == 0;
-    // pre-transition training
-    int rnd = IntRand(0, 19)(rng_), rnd2 = IntRand(0, 3)(rng_);
-    if (start_level == 18) {
-      if (rnd >= 18) {
-        start_lines = 305 + rnd2; // 330-25
-      } else if (rnd >= 15) {
-        start_lines = 205 + rnd2; // 230-25
-      } else if (rnd >= 10) {
-        start_lines = 105 + rnd2; // 130-25
+    // more training data for several formats
+    if (IntRand(0, 9)(rng_) < 3) {
+      switch (IntRand(0, 3)(rng_)) {
+        case 0: hz_avg = 12, hz_dev = 0, start_level = 18, microadj_delay = 21, drought_mode = false; break;
+        case 1: hz_avg = 30, hz_dev = 0, start_level = 19, microadj_delay = 8, drought_mode = false; break;
+        case 2: hz_avg = 12, hz_dev = 0, start_level = 18, microadj_delay = 21, drought_mode = true; break;
+        default: hz_avg = 20, hz_dev = 0, start_level = 29, microadj_delay = 61, drought_mode = false;
       }
-    } else if (start_level == 19) {
-      if (rnd >= 17) {
-        start_lines = 305 + rnd2;
-      } else if (rnd >= 10) {
-        start_lines = 205 + rnd2;
+    }
+    if (RealRand(0, 1)(rng_) < pre_trans) {
+      // pre-transition training
+      int rnd = IntRand(0, 19)(rng_), rnd2 = IntRand(0, 3)(rng_);
+      if (drought_mode) {
+        if (start_level == 18) {
+          if (rnd >= 17) {
+            start_lines = 205 + rnd2; // 230-25
+          } else if (rnd >= 11) {
+            start_lines = 105 + rnd2; // 130-25
+          }
+        } else {
+          if (rnd >= 12) start_lines = 205 + rnd2;
+        }
+      } else if (start_level == 18) {
+        if (rnd >= 18) {
+          start_lines = 305 + rnd2; // 330-25
+        } else if (rnd >= 15) {
+          start_lines = 205 + rnd2; // 230-25
+        } else if (rnd >= 11) {
+          start_lines = 105 + rnd2; // 130-25
+        }
+      } else if (start_level == 19) {
+        if (rnd >= 17) {
+          start_lines = 305 + rnd2;
+        } else if (rnd >= 12) {
+          start_lines = 205 + rnd2;
+        }
+      } else if (start_level == 29) {
+        if (rnd >= 15) start_lines = 205 + rnd2;
       }
-    } else if (start_level == 29) {
-      if (rnd >= 14) start_lines = 205 + rnd2;
     }
     ResetGame(start_level, hz_avg, hz_dev, microadj_delay, start_lines,
               drought_mode, game_over_penalty, right_gain, penalty_multiplier);
@@ -821,7 +844,10 @@ class Tetris {
 
   bool IsOver() const { return game_over_; }
   int GetScore() const { return score_; }
-  int GetLines() const { return lines_; }
+  int GetLines() const { return lines_ - start_lines_; }
+  std::pair<int, int> GetTetrisStat() const {
+    return {tetris_count_, right_tetris_count_};
+  }
 
   State GetState() const {
     State ret{};
@@ -1017,7 +1043,7 @@ class Tetris {
     place_stage_ = false;
     StoreMap_(false);
     game_over_ = MapEmpty_(stored_mp_lb_);
-    if (lines_ >= 330 || (start_level_ == 29 && lines_ >= 230)) game_over_ = true;
+    if (lines_ >= 330 || ((start_level_ == 29 || drought_mode_) && lines_ >= 230)) game_over_ = true;
     // for stage setting only, though real_placement_ is not set (not used)
     real_placement_set_ = true;
     return true;
@@ -1245,16 +1271,13 @@ static int TetrisInit(Tetris* self, PyObject* args, PyObject* kwds) {
 }
 
 static PyObject* Tetris_ResetRandom(Tetris* self, PyObject* args, PyObject* kwds) {
-  static const char* kwlist[] = {"fix_prob", "right_gain", "penalty_multiplier",
-                                 "step_reward", nullptr};
-  double fix_prob = 0.9, right_gain = 0.2, penalty_multiplier = 0.0,
-         step_reward = 0.0;
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "dddd", (char**)kwlist,
-                                   &fix_prob, &right_gain, &penalty_multiplier,
-                                   &step_reward)) {
+  static const char* kwlist[] = {"pre_trans", "right_gain", "penalty_multiplier", nullptr};
+  double pre_trans = 1.0, right_gain = 0.2, penalty_multiplier = 0.0;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "ddd", (char**)kwlist,
+                                   &pre_trans, &right_gain, &penalty_multiplier)) {
     return nullptr;
   }
-  self->ResetRandom(fix_prob, right_gain, penalty_multiplier, step_reward);
+  self->ResetRandom(pre_trans, right_gain, penalty_multiplier);
   Py_RETURN_NONE;
 }
 
@@ -1269,15 +1292,8 @@ static PyObject* Tetris_InputPlacement(Tetris* self, PyObject* args, PyObject* k
                                    &x, &y, &training)) {
     return nullptr;
   }
-  Tetris::Reward reward = self->InputPlacement({rotate, x, y}, training);
-  PyObject* t1 = PyFloat_FromDouble(reward.score_reward);
-  PyObject* t2 = PyFloat_FromDouble(reward.tot_reward);
-  PyObject* t3 = PyFloat_FromDouble((double)reward.target);
-  PyObject* ret = PyTuple_Pack(3, t1, t2, t3);
-  Py_DECREF(t1);
-  Py_DECREF(t2);
-  Py_DECREF(t3);
-  return ret;
+  double reward = self->InputPlacement({rotate, x, y}, training);
+  return PyFloat_FromDouble(reward);
 }
 
 static PyObject* Tetris_SetPreviousPlacement(Tetris* self, PyObject* args, PyObject* kwds) {
@@ -1379,19 +1395,18 @@ static bool ParseField(PyObject* obj, Tetris::Field& f) {
 static PyObject* Tetris_SetState(Tetris* self, PyObject* args, PyObject* kwds) {
   static const char *kwlist[] = {
     "field", "now_piece", "next_piece", "now_rotate", "now_x", "now_y", "lines",
-    "score", "pieces", "prev_drop_time", "prev_misdrop", "prev_micro",
-    "das_charged", nullptr
+    "score", "pieces", "prev_drop_time", "prev_misdrop", "prev_micro", nullptr
   };
   PyObject *field_obj, *now_piece_obj, *next_piece_obj;
   Tetris::Position pos;
   int lines, score, pieces;
   double prev_drop_time = 1000;
-  int prev_misdrop = 0, prev_micro = 0, das_charged = 1;
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "OOOiiiiii|dppp", (char**)kwlist,
+  int prev_misdrop = 0, prev_micro = 0;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "OOOiiiiii|dpp", (char**)kwlist,
                                    &field_obj, &now_piece_obj, &next_piece_obj,
                                    &pos.rotate, &pos.x, &pos.y, &lines, &score,
                                    &pieces, &prev_drop_time, &prev_misdrop,
-                                   &prev_micro, &das_charged)) {
+                                   &prev_micro)) {
     return nullptr;
   }
   Tetris::Field f;
@@ -1402,7 +1417,7 @@ static PyObject* Tetris_SetState(Tetris* self, PyObject* args, PyObject* kwds) {
   if (next_piece < 0) return nullptr;
   return PyBool_FromLong(self->SetState(f, now_piece, next_piece, pos, lines,
                                         score, pieces, prev_drop_time,
-                                        prev_misdrop, prev_micro, das_charged));
+                                        prev_misdrop, prev_micro));
 }
 
 static PyObject* Tetris_GetState(Tetris* self, PyObject* Py_UNUSED(ignored)) {
@@ -1426,34 +1441,26 @@ static PyObject* Tetris_StateShape(void*, PyObject* Py_UNUSED(ignored)) {
 
 static PyObject* Tetris_ResetGame(Tetris* self, PyObject* args, PyObject* kwds) {
   static const char* kwlist[] = {
-      "start_level", "hz_avg", "hz_dev", "das", "first_tap_max",
-      "microadj_delay", "orig_misdrop_rate", "misdrop_param_time",
-      "misdrop_param_pow", "target", "reward_multiplier",
-      "right_gain", "penalty_multiplier", "step_reward", nullptr
+      "start_level", "hz_avg", "hz_dev", "microadj_delay", "start_lines",
+      "drought_mode", "game_over_penalty", "right_gain", "penalty_multiplier",
+      nullptr
   };
   int start_level = 18;
   double hz_avg = 12;
   double hz_dev = 0;
-  int das = 0;
-  double first_tap_max = 0;
   int microadj_delay = 40;
-  double orig_misdrop_rate = 0;
-  double misdrop_param_time = 400;
-  double misdrop_param_pow = 1.0;
-  int target = 1000000;
-  double reward_multiplier = 2e-6;
+  int start_lines = 0;
+  int drought_mode = 0;
+  double game_over_penalty = 0;
   double right_gain = 0.2;
-  double penalty_multiplier = 0.0;
-  double step_reward = 0.0;
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|iddpdidddidddd", (char**)kwlist,
-        &start_level, &hz_avg, &hz_dev, &das, &first_tap_max, &microadj_delay,
-        &orig_misdrop_rate, &misdrop_param_time, &misdrop_param_pow, &target,
-        &reward_multiplier, &right_gain, &penalty_multiplier, &step_reward)) {
+  double penalty_multiplier = 1.0;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|iddiipddd", (char**)kwlist,
+        &start_level, &hz_avg, &hz_dev, &microadj_delay, &start_lines,
+        &drought_mode, &game_over_penalty, &right_gain, &penalty_multiplier)) {
     return nullptr;
   }
-  self->ResetGame(start_level, hz_avg, hz_dev, das, first_tap_max,
-      microadj_delay, orig_misdrop_rate, misdrop_param_time, misdrop_param_pow,
-      target, reward_multiplier, right_gain, penalty_multiplier, step_reward);
+  self->ResetGame(start_level, hz_avg, hz_dev, microadj_delay, start_lines,
+      drought_mode, game_over_penalty, right_gain, penalty_multiplier);
   Py_RETURN_NONE;
 }
 
@@ -1463,6 +1470,16 @@ static PyObject* Tetris_GetScore(Tetris* self, PyObject* Py_UNUSED(ignored)) {
 
 static PyObject* Tetris_GetLines(Tetris* self, PyObject* Py_UNUSED(ignored)) {
   return PyLong_FromLong(self->GetLines());
+}
+
+static PyObject* Tetris_GetTetrisStat(Tetris* self, PyObject* Py_UNUSED(ignored)) {
+  auto stat = self->GetTetrisStat();
+  PyObject* r1 = PyLong_FromLong(stat.first);
+  PyObject* r2 = PyLong_FromLong(stat.second);
+  PyObject* ret = PyTuple_Pack(2, r1, r2);
+  Py_DECREF(r1);
+  Py_DECREF(r2);
+  return ret;
 }
 
 static inline PyObject* FramePyObject(const Tetris::FrameInput& f) {
@@ -1540,6 +1557,7 @@ static PyMethodDef py_tetris_methods[] = {
      "Reset a game using given parameters"},
     {"GetLines", (PyCFunction)Tetris_GetLines, METH_NOARGS, "Get lines"},
     {"GetScore", (PyCFunction)Tetris_GetScore, METH_NOARGS, "Get score"},
+    {"GetTetrisStat", (PyCFunction)Tetris_GetTetrisStat, METH_NOARGS, "Get tetris statistics"},
     {"GetPlannedSequence", (PyCFunction)Tetris_GetPlannedSequence,
      METH_VARARGS | METH_KEYWORDS, "Get planned frame input sequence"},
     {"GetMicroadjSequence", (PyCFunction)Tetris_GetMicroadjSequence,
@@ -1607,7 +1625,7 @@ int main() {
       case 'p': t.PrintAllState(); break;
       case 'f': t.PrintState(true); break;
       case 's': t.PrintState(); break;
-      case 'r': t.ResetRandom(0.3, 0.0); break;
+      case 'r': t.ResetRandom(1, 0.3, 0.0); break;
       case 'i': {
         int r, x, y;
         scanf("%d %d %d", &r, &x, &y);

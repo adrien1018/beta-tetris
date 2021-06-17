@@ -2,7 +2,7 @@
 
 # Modified from https://github.com/vpj/rl_samples
 
-import sys, traceback, os, collections, math
+import sys, traceback, os, collections, math, time
 from typing import Dict, List
 from sortedcontainers import SortedList
 from multiprocessing import shared_memory
@@ -23,7 +23,6 @@ from saver import TorchSaver
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 #device = 'cpu'
 
-
 class Main:
     def __init__(self, c: Configs, name: str):
         self.name = name
@@ -43,13 +42,10 @@ class Main:
         # dynamic hyperparams
         self.cur_lr = self.c.lr()
         self.cur_reg_l2 = self.c.reg_l2()
-        self.cur_step_reward = 0.
+        self.cur_pre_trans = 0.
         self.cur_right_gain = 0.
-        self.cur_fix_prob = 0.
         self.cur_neg_mul = 0.
         self.cur_entropy_weight = self.c.entropy_weight()
-        self.cur_prob_reg_weight = self.c.prob_reg_weight()
-        self.cur_target_prob_weight = self.c.target_prob_weight()
         self.cur_gamma = self.c.gamma()
         self.cur_lamda = self.c.lamda()
 
@@ -60,7 +56,7 @@ class Main:
 
         # initialize tensors for observations
         shapes = [(self.envs, *kTensorDim),
-                  (self.envs, self.c.worker_steps, 3),
+                  (self.envs, self.c.worker_steps),
                   (self.envs, self.c.worker_steps)]
         types = [np.dtype('float32'), np.dtype('float32'), np.dtype('bool')]
         self.shms = [
@@ -74,7 +70,7 @@ class Main:
         # create workers
         shm = [(shm.name, shape, typ) for shm, shape, typ in zip(self.shms, shapes, types)]
         self.workers = [Worker(name, shm, self.w_range(i), 27 + i) for i in range(self.c.n_workers)]
-        self.set_game_param(self.c.right_gain(), self.c.fix_prob(), self.c.neg_mul(), self.c.step_reward())
+        self.set_game_param(self.c.pre_trans(), self.c.right_gain(), self.c.neg_mul())
         for i in self.workers: i.child.send(('reset', None))
         for i in self.workers: i.child.recv()
 
@@ -88,20 +84,16 @@ class Main:
         self.cur_lr = lr
         self.cur_reg_l2 = reg_l2
 
-    def set_game_param(self, gain, fix_prob, neg_mul, step_reward):
-        if gain == self.cur_right_gain and fix_prob == self.cur_fix_prob and \
-                neg_mul == self.cur_neg_mul and step_reward == self.cur_step_reward:
-            return
-        for i in self.workers: i.child.send(('set_param', (gain, fix_prob, neg_mul, step_reward)))
+    def set_game_param(self, pre_trans, gain, neg_mul):
+        if pre_trans == self.cur_pre_trans and gain == self.cur_right_gain and \
+                neg_mul == self.cur_neg_mul: return
+        for i in self.workers: i.child.send(('set_param', (pre_trans, gain, neg_mul)))
+        self.cur_pre_trans = pre_trans
         self.cur_right_gain = gain
-        self.cur_fix_prob = fix_prob
         self.cur_neg_mul = neg_mul
-        self.cur_step_reward = step_reward
 
-    def set_weight_param(self, entropy, prob_reg, target_prob, gamma, lamda):
+    def set_weight_param(self, entropy, gamma, lamda):
         self.cur_entropy_weight = entropy
-        self.cur_prob_reg_weight = prob_reg
-        self.cur_target_prob_weight = target_prob
         self.cur_gamma = gamma
         self.cur_lamda = lamda
 
@@ -122,10 +114,10 @@ class Main:
 
     def sample(self, train = True) -> (Dict[str, np.ndarray], List):
         """### Sample data with current policy"""
-        actions = torch.zeros((self.envs, self.c.worker_steps), dtype = torch.int32, device = device)
-        obs = torch.zeros((self.envs, self.c.worker_steps, *kTensorDim), dtype = torch.float32, device = device)
-        log_pis = torch.zeros((self.envs, self.c.worker_steps), dtype = torch.float32, device = device)
-        values = torch.zeros((self.envs, self.c.worker_steps, 3), dtype = torch.float32, device = device)
+        actions = torch.zeros((self.c.worker_steps, self.envs), dtype = torch.int32, device = device)
+        obs = torch.zeros((self.c.worker_steps, self.envs, *kTensorDim), dtype = torch.float32, device = device)
+        log_pis = torch.zeros((self.c.worker_steps, self.envs), dtype = torch.float32, device = device)
+        values = torch.zeros((self.c.worker_steps, self.envs), dtype = torch.float32, device = device)
 
         # sample `worker_steps` from each worker
         tot_lines = 0
@@ -134,13 +126,13 @@ class Main:
             with torch.no_grad():
                 # `self.obs` keeps track of the last observation from each worker,
                 #  which is the input for the model to sample the next action
-                obs[:, t] = self.obs
+                obs[t] = self.obs
                 # sample actions from $\pi_{\theta_{OLD}}$
                 pi, v = self.model(self.obs)
-                values[:, t] = v
+                values[t] = v
                 a = pi.sample()
-                actions[:, t] = a
-                log_pis[:, t] = pi.log_prob(a)
+                actions[t] = a
+                log_pis[t] = pi.log_prob(a)
                 actions_cpu = a.cpu().numpy()
 
             # run sampled actions on each worker
@@ -157,12 +149,14 @@ class Main:
                         tot_score += info['score']
                         tracker.add('reward', info['reward'])
                         tracker.add('scorek', info['score'] * 1e-3)
-                        tracker.add('lines', info['lines'])
-                        tracker.add('length', info['length'])
+                        tracker.add('lns', info['lines'])
+                        tracker.add('len', info['length'])
+                        tracker.add('trt', info['tetris'])
+                        tracker.add('rtrt', info['rtetris'])
             self.obs = obs_to_torch(self.obs_np, device)
 
         # reshape rewards & log rewards
-        reward_max = self.rewards[:,:,0].max()
+        reward_max = self.rewards.max()
         if train:
             tracker.add('maxk', reward_max / 1e-2)
             tracker.add('mil_games', self.total_games * 1e-6)
@@ -177,37 +171,37 @@ class Main:
             'log_pis': log_pis,
             'advantages': advantages
         }
-        # samples are currently in [workers, time] table, flatten it
+        # samples are currently in [time, workers] table, flatten it
         for i in samples:
-            samples[i] = samples[i].view(-1, *samples[i].shape[2:])
+            samples[i] = samples[i].reshape(-1, *samples[i].shape[2:])
         return samples
 
     def _calc_advantages(self, done: np.ndarray, rewards: np.ndarray, values: torch.Tensor) -> torch.Tensor:
         """### Calculate advantages"""
         with torch.no_grad():
-            rewards = torch.from_numpy(rewards).to(device)
-            done = torch.from_numpy(done).to(device)
+            rewards = torch.transpose(torch.from_numpy(rewards).to(device), 0, 1)
+            done_neg = ~torch.transpose(torch.from_numpy(done).to(device), 0, 1)
 
             # advantages table
-            advantages = torch.zeros((self.envs, self.c.worker_steps, 3), dtype = torch.float32, device = device)
-            last_advantage = torch.zeros((self.envs, 3), dtype = torch.float32, device = device)
+            advantages = torch.zeros((self.c.worker_steps, self.envs), dtype = torch.float32, device = device)
+            last_advantage = torch.zeros(self.envs, dtype = torch.float32, device = device)
 
             # $V(s_{t+1})$
             _, last_value = self.model(self.obs)
 
             for t in reversed(range(self.c.worker_steps)):
                 # mask if episode completed after step $t$
-                mask = (~done[:, t]).unsqueeze(-1)
+                mask = done_neg[t]
                 last_value = last_value * mask
                 last_advantage = last_advantage * mask
                 # $\delta_t$
-                delta = rewards[:, t] + self.cur_gamma * last_value - values[:, t]
+                delta = rewards[t] + self.cur_gamma * last_value - values[t]
                 # $\hat{A_t} = \delta_t + \gamma \lambda \hat{A_{t+1}}$
                 last_advantage = delta + self.cur_gamma * self.cur_lamda * last_advantage
                 # note that we are collecting in reverse order.
-                advantages[:, t] = last_advantage
-                last_value = values[:, t]
-        return advantages
+                advantages[t] = last_advantage
+                last_value = values[t]
+            return advantages
 
     def train(self, samples: Dict[str, torch.Tensor]):
         """### Train the model based on samples"""
@@ -225,8 +219,9 @@ class Main:
                     t_end = t_start + self.c.mini_batch_size
                     mini_batch_indexes = indexes[t_start:t_end]
                     mini_batch = {}
-                    for k, v in samples.items():
-                        mini_batch[k] = v[mini_batch_indexes]
+                    with torch.no_grad():
+                        for k, v in samples.items():
+                            mini_batch[k] = v[t_start:t_end]
                     loss = self._calc_loss(clip_range = self.c.clipping_range,
                                         samples = mini_batch) / loss_mul
                     self.scaler.scale(loss).backward()
@@ -245,8 +240,8 @@ class Main:
     @staticmethod
     def _preprocess_samples(samples: Dict[str, torch.Tensor]):
         # $R_t$ returns sampled from $\pi_{\theta_{OLD}}$
-        samples['returns'] = (samples['values'][:,:2] + samples['advantages'][:,:2]).float()
-        samples['advantages'] = Main._normalize(samples['advantages'][:,2])
+        samples['returns'] = (samples['values'] + samples['advantages']).float()
+        samples['advantages'] = Main._normalize(samples['advantages'])
 
     def _calc_loss(self, samples: Dict[str, torch.Tensor], clip_range: float) -> torch.Tensor:
         """## PPO Loss"""
@@ -273,32 +268,26 @@ class Main:
         # #### Entropy Bonus
         entropy_bonus = pi.entropy()
         entropy_bonus = entropy_bonus.mean()
-        # add regularization to logits to revive previously-seen impossible moves
-        max_logit = pi_val.max().item()
-        prob_reg = -(torch.nan_to_num(pi_val - max_logit, neginf = 0) ** 2).mean() * self.cur_prob_reg_weight
 
         # #### Value
         # Clipping makes sure the value function $V_\theta$ doesn't deviate
         #  significantly from $V_{\theta_{OLD}}$.
-        clipped_value = samples['values'][:,:2] + (value[:,:2] - samples['values'][:,:2]).clamp(
+        clipped_value = samples['values'] + (value - samples['values']).clamp(
                 min = -clip_range, max = clip_range)
-        vf_loss = torch.max((value[:,:2] - samples['returns']) ** 2,
+        vf_loss = torch.max((value - samples['returns']) ** 2,
                             (clipped_value - samples['returns']) ** 2)
-        vf_loss[:,1] *= self.cur_target_prob_weight
-        vf_loss_score = 0.5 * vf_loss[:,0].mean()
-        vf_loss = 0.5 * vf_loss.sum(-1).mean()
+        vf_loss = 0.5 * vf_loss.mean()
 
         # we want to maximize $\mathcal{L}^{CLIP+VF+EB}(\theta)$
         # so we take the negative of it as the loss
         loss = -(policy_reward - self.c.vf_weight * vf_loss + \
-                self.cur_entropy_weight * (entropy_bonus + prob_reg))
+                self.cur_entropy_weight * entropy_bonus)
 
         # for monitoring
         approx_kl_divergence = .5 * ((samples['log_pis'] - log_pi) ** 2).mean()
         clip_fraction = (abs((ratio - 1.0)) > clip_range).to(torch.float).mean()
         tracker.add({'policy_reward': policy_reward,
                      'vf_loss': vf_loss ** 0.5,
-                     'vf_loss_1': vf_loss_score ** 0.5,
                      'entropy_bonus': entropy_bonus,
                      'kl_div': approx_kl_divergence,
                      'clip_fraction': clip_fraction})
@@ -310,9 +299,9 @@ class Main:
         if offset > 100:
             # If resumed, sample several iterations first to reduce sampling bias
             for i in range(16): self.sample(False)
+            tracker.save() # increment step
         for _ in monit.loop(self.c.updates - offset):
             update = tracker.get_global_step()
-            progress = update / self.c.updates
             # sample with current policy
             samples = self.sample()
             # train the model
@@ -321,16 +310,15 @@ class Main:
             tracker.save()
             if (update + 1) % 2 == 0:
                 self.set_optim(self.c.lr(), self.c.reg_l2())
-                self.set_game_param(self.c.right_gain(), self.c.fix_prob(), self.c.neg_mul(), self.c.step_reward())
-                self.set_weight_param(self.c.entropy_weight(), self.c.prob_reg_weight(),
-                        self.c.target_prob_weight(), self.c.gamma(), self.c.lamda())
+                self.set_game_param(self.c.pre_trans(), self.c.right_gain(), self.c.neg_mul())
+                self.set_weight_param(self.c.entropy_weight(), self.c.gamma(), self.c.lamda())
             if (update + 1) % 25 == 0: logger.log()
-            if (update + 1) % 200 == 0: experiment.save_checkpoint()
+            if (update + 1) % 250 == 0: experiment.save_checkpoint()
 
 import argparse
 
 if __name__ == "__main__":
-    conf = LoadConfig()[0]
+    conf, args, _ = LoadConfig()
     m = Main(conf, args['name'])
     experiment.add_model_savers({
             'model': TorchSaver('model', m.model),

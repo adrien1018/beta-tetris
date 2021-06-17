@@ -14,10 +14,10 @@ class ConvBlock(nn.Module):
     def __init__(self, ch):
         super().__init__()
         self.main = nn.Sequential(
-                nn.Conv2d(ch, ch, 5, padding = 2),
+                nn.Conv2d(ch, ch, 3, padding = 1),
                 nn.BatchNorm2d(ch),
                 nn.ReLU(True),
-                nn.Conv2d(ch, ch, 5, padding = 2),
+                nn.Conv2d(ch, ch, 3, padding = 1),
                 nn.BatchNorm2d(ch),
                 )
         self.final = nn.ReLU(True)
@@ -55,7 +55,6 @@ class Model(nn.Module):
         q = torch.zeros((obs.shape[0], kInChannel, kH, kW), dtype = torch.float32, device = obs.device)
         q[:,:kOrd] = obs[:,:kOrd]
         misc = obs[:,kOrd].view(obs.shape[0], -1)[:,:kInChannel-kOrd]
-        target_mul = misc[:,kTargetId] * kTargetMultiplier
         q[:,kOrd:] = misc.view(obs.shape[0], -1, 1, 1)
         x = self.start(q)
         x = self.res(x)
@@ -65,7 +64,7 @@ class Model(nn.Module):
         with autocast(enabled = False):
             pi = pi.float()
             pi[valid == 0] = -math.inf
-            value = self.value_last(value.float()).view(-1)
+            value = self.value_last(value.float()).reshape(-1)
             if return_categorical: pi = Categorical(logits = pi)
             return pi, value
 

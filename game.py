@@ -11,33 +11,35 @@ class Game:
     def __init__(self, seed: int):
         self.args = (0, False)
         self.env = tetris.Tetris(seed)
+        self.pre_trans = 1.
         self.right_gain = 0.
-        self.fix_prob = 0.
         self.penalty_multiplier = 0.
-        self.step_reward = 0.
         self.reset()
 
     def step(self, action):
         r, x, y = action // 200, action // 10 % 20, action % 10
-        reward_score, reward, is_target = self.env.InputPlacement(r, x, y)
+        reward = self.env.InputPlacement(r, x, y)
         self.reward += reward
         self.length += 0.5
 
         info = None
         is_over = False
         if self.env.IsOver():
+            trt, rtrt = self.env.GetTetrisStat()
             info = {'reward': self.reward,
                     'score': self.env.GetScore(),
                     'lines': self.env.GetLines(),
+                    'tetris': trt,
+                    'rtetris': rtrt,
                     'length': self.length}
             is_over = True
             self.reset()
-        return self.env.GetState(), np.array([reward_score, is_target, reward]), is_over, info
+        return self.env.GetState(), reward, is_over, info
 
     def reset(self):
         self.reward = 0.
         self.length = 0.
-        self.env.ResetRandom(self.fix_prob, self.right_gain, self.penalty_multiplier, self.step_reward)
+        self.env.ResetRandom(self.pre_trans, self.right_gain, self.penalty_multiplier)
         return self.env.GetState()
 
 def worker_process(remote: connection.Connection, name: str, shms: list, idx: slice, seed: int):
@@ -63,7 +65,7 @@ def worker_process(remote: connection.Connection, name: str, shms: list, idx: sl
                 step, data, gb = data
                 result = []
                 for i in range(num):
-                    if save and rands[i] < 0.008:
+                    if save and rands[i] < 0.005:
                         print(gb, 'Game', i, data[i] // 200, data[i] // 10 % 20, data[i] % 10)
                         games[i].env.PrintAllState()
                         print('', flush = True)
@@ -85,12 +87,11 @@ def worker_process(remote: connection.Connection, name: str, shms: list, idx: sl
                 for i in shms: i[0].close()
                 break
             elif cmd == "set_param":
-                gain, fix_prob, penalty_mul, step_reward = data
+                pre_trans, gain, penalty_mul = data
                 for i in games:
+                    i.pre_trans = pre_trans
                     i.right_gain = gain
-                    i.fix_prob = fix_prob
                     i.penalty_multiplier = penalty_mul
-                    i.step_reward = step_reward
             else:
                 raise NotImplementedError
     except:
