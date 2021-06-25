@@ -165,7 +165,7 @@ class Tetris {
 
   void SpawnPiece_() {
     const auto probs = drought_mode_ ? kTransitionProbDrought_ :
-        kTransitionProbDrought_;
+        kTransitionProb_;
     int next = std::discrete_distribution<int>(
         probs[next_piece_], probs[next_piece_] + kT)(piece_rng_);
     now_piece_ = next_piece_;
