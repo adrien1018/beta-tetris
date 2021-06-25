@@ -323,7 +323,7 @@ if __name__ == "__main__":
     experiment.add_model_savers({
             'model': TorchSaver('model', m.model),
             'scaler': TorchSaver('scaler', m.scaler),
-            'optimizer': TorchSaver('optimizer', m.optimizer),
+            'optimizer': TorchSaver('optimizer', m.optimizer, not args['ignore_optimizer']),
         })
     if len(args['uuid']): experiment.load(args['uuid'], args['checkpoint'])
     with experiment.start():

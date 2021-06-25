@@ -13,13 +13,13 @@ class Configs(BaseConfigs):
     # number of epochs to train the model with sampled data
     epochs: int = 1
     # number of worker processes
-    n_workers: int = 32
-    env_per_worker: int = 4
+    n_workers: int = 16
+    env_per_worker: int = 8
     # number of steps to run on each process for a single update
     worker_steps: int = 256
     # size of mini batches
     n_update_per_epoch: int = 32
-    mini_batch_size: int = 512
+    mini_batch_size: int = 1024
     channels: int = 128
     blocks: int = 8
     lr: float = FloatDynamicHyperParam(1e-4, range_ = (0, 1e-3))
@@ -38,6 +38,7 @@ def LoadConfig(with_experiment = True):
         parser.add_argument('name')
         parser.add_argument('uuid', nargs = '?', default = '')
         parser.add_argument('checkpoint', nargs = '?', type = int, default = None)
+        parser.add_argument('--ignore-optimizer', action = 'store_true')
     conf = Configs()
     keys = conf._to_json()
     dynamic_keys = set()

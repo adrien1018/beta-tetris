@@ -498,6 +498,7 @@ class Tetris {
       if (input.l || input.r) prev_lr = i * kFrameLength_;
     }
     double prev = std::max(start_delay, prev_input.seq.size() * kFrameLength_);
+    const double n_start_delay = prev;
 
     std::vector<FrameInput> ret = prev_input.seq;
     auto Set = [&ret](size_t frame, MoveType mv) {
@@ -514,7 +515,7 @@ class Tetris {
         const auto& move = seq.moves[i];
         double lower = prev;
         if (!IsAB(move.type) && move.height_start == start_row) {
-          lower = std::max(lower, start_delay);
+          lower = n_start_delay;
         } else if (i > 0 && !IsAB(move.type) && IsAB(seq.moves[i - 1].type)) {
           lower += kFrameLength_;
         }
