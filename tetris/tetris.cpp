@@ -692,7 +692,6 @@ class Tetris {
     consecutive_invalid_ = 0;
     StoreMap_(true);
     game_over_ = MapEmpty_(stored_mp_lb_);
-    if (game_over_) reward += game_over_penalty_ * penalty_multiplier_;
     return reward;
   }
 
@@ -982,6 +981,7 @@ class Tetris {
     }
     double ret = InputPlacement_(pos);
     if (training && orig_stage && !place_stage_) TrainingSetPlacement();
+    if (game_over_) ret += game_over_penalty_ * penalty_multiplier_;
     return ret;
   }
 
