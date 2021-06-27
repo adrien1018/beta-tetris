@@ -1,6 +1,7 @@
-import multiprocessing, hashlib, traceback, sys, os, random
-import numpy as np
-from multiprocessing import connection, shared_memory
+import hashlib, traceback, sys, os, random
+import numpy as np, torch
+from multiprocessing import shared_memory
+from torch.multiprocessing import Process, Pipe
 
 import tetris
 
@@ -42,7 +43,7 @@ class Game:
         self.env.ResetRandom(self.pre_trans, self.right_gain, self.penalty_multiplier)
         return self.env.GetState()
 
-def worker_process(remote: connection.Connection, name: str, shms: list, idx: slice, seed: int):
+def worker_process(remote, name: str, shms: list, idx: slice, seed: int):
     if idx.start == 0 and name:
         fp = open('logs/{}/{}'.format(name, os.getpid()), 'w')
         os.dup2(fp.fileno(), 1)
@@ -104,9 +105,8 @@ def worker_process(remote: connection.Connection, name: str, shms: list, idx: sl
 class Worker:
     """Creates a new worker and runs it in a separate process."""
     def __init__(self, name, shms, idx, seed):
-        self.child, parent = multiprocessing.Pipe()
-        self.process = multiprocessing.Process(
+        self.child, parent = Pipe()
+        self.process = Process(
                 target = worker_process,
                 args = (parent, name, shms, idx, seed))
         self.process.start()
-

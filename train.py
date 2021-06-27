@@ -5,7 +5,6 @@
 import sys, traceback, os, collections, math, time
 from typing import Dict, List
 from sortedcontainers import SortedList
-from multiprocessing import shared_memory
 
 import numpy as np, torch
 from torch import optim
@@ -15,7 +14,8 @@ from torch.cuda.amp import autocast, GradScaler
 from labml import monit, tracker, logger, experiment
 from labml.configs import FloatDynamicHyperParam
 
-from game import Worker, kTensorDim
+from game import kTensorDim
+from generator import GeneratorProcess
 from model import Model, obs_to_torch
 from config import Configs, LoadConfig
 from saver import TorchSaver
@@ -34,8 +34,6 @@ class Main:
         self.update_batch_size = self.batch_size // self.c.n_update_per_epoch
 
         # #### Initialize
-        self.total_games = 0
-
         # model for sampling
         self.model = Model(c.channels, c.blocks).to(device)
 
@@ -45,36 +43,18 @@ class Main:
         self.cur_pre_trans = 0.
         self.cur_right_gain = 0.
         self.cur_neg_mul = 0.
+        self.cur_gamma = 0.
+        self.cur_lamda = 0.
         self.cur_entropy_weight = self.c.entropy_weight()
-        self.cur_gamma = self.c.gamma()
-        self.cur_lamda = self.c.lamda()
 
         # optimizer
         self.scaler = GradScaler()
         self.optimizer = optim.Adam(self.model.parameters(), lr = self.cur_lr,
                 weight_decay = self.cur_reg_l2)
 
-        # initialize tensors for observations
-        shapes = [(self.envs, *kTensorDim),
-                  (self.envs, self.c.worker_steps),
-                  (self.envs, self.c.worker_steps)]
-        types = [np.dtype('float32'), np.dtype('float32'), np.dtype('bool')]
-        self.shms = [
-            shared_memory.SharedMemory(create = True, size = math.prod(shape) * typ.itemsize)
-            for shape, typ in zip(shapes, types)
-        ]
-        self.obs_np, self.rewards, self.done = [
-            np.ndarray(shape, dtype = typ, buffer = shm.buf)
-            for shm, shape, typ in zip(self.shms, shapes, types)
-        ]
-        # create workers
-        shm = [(shm.name, shape, typ) for shm, shape, typ in zip(self.shms, shapes, types)]
-        self.workers = [Worker(name, shm, self.w_range(i), 27 + i) for i in range(self.c.n_workers)]
-        self.set_game_param(self.c.pre_trans(), self.c.right_gain(), self.c.neg_mul())
-        for i in self.workers: i.child.send(('reset', None))
-        for i in self.workers: i.child.recv()
-
-        self.obs = obs_to_torch(self.obs_np, device)
+        # generator
+        self.generator = GeneratorProcess(self.name, self.model, self.c)
+        self.set_game_param(self.c.pre_trans(), self.c.right_gain(), self.c.neg_mul(), self.c.gamma(), self.c.lamda())
 
     def set_optim(self, lr, reg_l2):
         if lr == self.cur_lr and reg_l2 == self.cur_reg_l2: return
@@ -84,124 +64,22 @@ class Main:
         self.cur_lr = lr
         self.cur_reg_l2 = reg_l2
 
-    def set_game_param(self, pre_trans, gain, neg_mul):
+    def set_game_param(self, pre_trans, gain, neg_mul, gamma, lamda):
         if pre_trans == self.cur_pre_trans and gain == self.cur_right_gain and \
-                neg_mul == self.cur_neg_mul: return
-        for i in self.workers: i.child.send(('set_param', (pre_trans, gain, neg_mul)))
+                neg_mul == self.cur_neg_mul and gamma == self.cur_gamma and lamda == self.cur_lamda: return
+        self.generator.SetParams(pre_trans, gain, neg_mul, gamma, lamda)
         self.cur_pre_trans = pre_trans
         self.cur_right_gain = gain
         self.cur_neg_mul = neg_mul
-
-    def set_weight_param(self, entropy, gamma, lamda):
-        self.cur_entropy_weight = entropy
         self.cur_gamma = gamma
         self.cur_lamda = lamda
 
-    def w_range(self, x): return slice(x * self.c.env_per_worker, (x + 1) * self.c.env_per_worker)
+    def set_weight_param(self, entropy):
+        self.cur_entropy_weight = entropy
 
     def destroy(self):
-        try:
-            for i in self.workers: i.child.send(('close', None))
-        except: pass
-        for i in self.shms:
-            i.close()
-            i.unlink()
-        self.workers = None
-        self.shms = None
-        self.obs_np = None
-        self.rewards = None
-        self.done = None
-
-    def sample(self, train = True) -> (Dict[str, np.ndarray], List):
-        """### Sample data with current policy"""
-        actions = torch.zeros((self.c.worker_steps, self.envs), dtype = torch.int32, device = device)
-        obs = torch.zeros((self.c.worker_steps, self.envs, *kTensorDim), dtype = torch.float32, device = device)
-        log_pis = torch.zeros((self.c.worker_steps, self.envs), dtype = torch.float32, device = device)
-        values = torch.zeros((self.c.worker_steps, self.envs), dtype = torch.float32, device = device)
-
-        # sample `worker_steps` from each worker
-        tot_lines = 0
-        tot_score = 0
-        for t in range(self.c.worker_steps):
-            with torch.no_grad():
-                # `self.obs` keeps track of the last observation from each worker,
-                #  which is the input for the model to sample the next action
-                obs[t] = self.obs
-                # sample actions from $\pi_{\theta_{OLD}}$
-                pi, v = self.model(self.obs)
-                values[t] = v
-                a = pi.sample()
-                actions[t] = a
-                log_pis[t] = pi.log_prob(a)
-                actions_cpu = a.cpu().numpy()
-
-            # run sampled actions on each worker
-            # workers will place results in self.obs_np,rewards,done
-            for w, worker in enumerate(self.workers):
-                worker.child.send(('step', (t, actions_cpu[self.w_range(w)], tracker.get_global_step())))
-            for i in self.workers:
-                info_arr = i.child.recv()
-                # collect episode info, which is available if an episode finished
-                if train:
-                    self.total_games += len(info_arr)
-                    for info in info_arr:
-                        tot_lines += info['lines']
-                        tot_score += info['score']
-                        tracker.add('reward', info['reward'])
-                        tracker.add('scorek', info['score'] * 1e-3)
-                        tracker.add('lns', info['lines'])
-                        tracker.add('len', info['length'])
-                        tracker.add('trt', info['tetris'])
-                        tracker.add('rtrt', info['rtetris'])
-            self.obs = obs_to_torch(self.obs_np, device)
-
-        # reshape rewards & log rewards
-        reward_max = self.rewards.max()
-        if train:
-            tracker.add('maxk', reward_max / 1e-2)
-            tracker.add('mil_games', self.total_games * 1e-6)
-            tracker.add('perline', tot_score * 1e-3 / tot_lines)
-
-        # calculate advantages
-        advantages = self._calc_advantages(self.done, self.rewards, values)
-        samples = {
-            'obs': obs,
-            'actions': actions,
-            'values': values,
-            'log_pis': log_pis,
-            'advantages': advantages
-        }
-        # samples are currently in [time, workers] table, flatten it
-        for i in samples:
-            samples[i] = samples[i].reshape(-1, *samples[i].shape[2:])
-        return samples
-
-    def _calc_advantages(self, done: np.ndarray, rewards: np.ndarray, values: torch.Tensor) -> torch.Tensor:
-        """### Calculate advantages"""
-        with torch.no_grad():
-            rewards = torch.transpose(torch.from_numpy(rewards).to(device), 0, 1)
-            done_neg = ~torch.transpose(torch.from_numpy(done).to(device), 0, 1)
-
-            # advantages table
-            advantages = torch.zeros((self.c.worker_steps, self.envs), dtype = torch.float32, device = device)
-            last_advantage = torch.zeros(self.envs, dtype = torch.float32, device = device)
-
-            # $V(s_{t+1})$
-            _, last_value = self.model(self.obs)
-
-            for t in reversed(range(self.c.worker_steps)):
-                # mask if episode completed after step $t$
-                mask = done_neg[t]
-                last_value = last_value * mask
-                last_advantage = last_advantage * mask
-                # $\delta_t$
-                delta = rewards[t] + self.cur_gamma * last_value - values[t]
-                # $\hat{A_t} = \delta_t + \gamma \lambda \hat{A_{t+1}}$
-                last_advantage = delta + self.cur_gamma * self.cur_lamda * last_advantage
-                # note that we are collecting in reverse order.
-                advantages[t] = last_advantage
-                last_value = values[t]
-            return advantages
+        self.generator.Close()
+        self.generator = None
 
     def train(self, samples: Dict[str, torch.Tensor]):
         """### Train the model based on samples"""
@@ -298,20 +176,25 @@ class Main:
         offset = tracker.get_global_step()
         if offset > 100:
             # If resumed, sample several iterations first to reduce sampling bias
-            for i in range(16): self.sample(False)
+            for i in range(16): self.generator.StartGenerate(offset)
             tracker.save() # increment step
+        else:
+            self.generator.StartGenerate(offset)
         for _ in monit.loop(self.c.updates - offset):
             update = tracker.get_global_step()
             # sample with current policy
-            samples = self.sample()
+            samples, info = self.generator.GetData()
+            self.generator.StartGenerate(update)
+            tracker.add(info)
             # train the model
             self.train(samples)
+            self.generator.SendModel(self.model)
             # write summary info to the writer, and log to the screen
             tracker.save()
             if (update + 1) % 2 == 0:
                 self.set_optim(self.c.lr(), self.c.reg_l2())
-                self.set_game_param(self.c.pre_trans(), self.c.right_gain(), self.c.neg_mul())
-                self.set_weight_param(self.c.entropy_weight(), self.c.gamma(), self.c.lamda())
+                self.set_game_param(self.c.pre_trans(), self.c.right_gain(), self.c.neg_mul(), self.c.gamma(), self.c.lamda())
+                self.set_weight_param(self.c.entropy_weight())
             if (update + 1) % 25 == 0: logger.log()
             if (update + 1) % 250 == 0: experiment.save_checkpoint()
 
