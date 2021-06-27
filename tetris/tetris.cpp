@@ -154,6 +154,9 @@ class Tetris {
   static constexpr double kMisdropReward_ = -0.001;
   // Provide a small reward deduction each time the agent makes an misdrop;
   //   this can guide the agent to avoid high-risk movements
+  static constexpr double kBottomGain_ = 0.4;
+  // Provide a reward gain for bottom row scoring to guide the agent to not
+  //   score dirty tetrises.
   double right_gain_ = 0.2;
   // Provide a reward gain to guide the agent to use right well strategy.
   // This can be decreased during training.
@@ -686,6 +689,7 @@ class Tetris {
     pieces_++;
     double score_reward = kRewardMultiplier_ * score_delta;
     if (pos.y == 9) score_reward *= 1 + right_gain_;
+    if (pos.x >= 18) score_reward *= 1 + kBottomGain_;
     reward += score_reward + kStepReward_;
     real_placement_set_ = false;
     place_stage_ = true;
@@ -956,13 +960,13 @@ class Tetris {
   }
 
   FrameSequence GetPlannedSequence(bool truncate = true) const {
-    FrameSequence fseq = planned_real_fseq_;
+    FrameSequence fseq = game_over_ ? FrameSequence{} : planned_real_fseq_;
     if (truncate) fseq.seq.resize(microadj_delay_, FrameInput{});
     return fseq;
   }
 
   FrameSequence GetMicroadjSequence(bool truncate = true) const {
-    FrameSequence fseq = real_fseq_;
+    FrameSequence fseq = game_over_ ? FrameSequence{} : real_fseq_;
     if (truncate && pieces_ > 1) {
       if (fseq.seq.size() <= (size_t)microadj_delay_) {
         fseq.seq.clear();
@@ -1636,6 +1640,42 @@ int main() {
       }
     }
   }
+  /*
+  int field[][10] = {
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {0,0,1,0,0,0,0,0,0,0},
+    {0,1,1,1,0,0,0,1,0,0},
+    {1,1,1,1,1,0,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,0},
+    {1,1,1,1,1,1,1,1,1,0},
+    {1,1,1,1,1,1,1,1,1,0},
+    {1,1,1,1,1,1,1,1,0,1},
+  };
+  Tetris::Field r_field;
+  for (int i = 0; i < 20; i++) for (int j = 0; j < 10; j++) r_field[i][j] = field[i][j];
+  t.ResetGame(18, 12, 0, 21, 0, true, 0, 0, 1);
+  t.SetState(r_field, 3, 5, {0, 12, 7}, 139, 401880, 362);
+  t.InputPlacement({0, 13, 9});
+  t.PrintAllState();
+  t.InputPlacement({0, 12, 8});
+  t.PrintAllState();
+  t.InputPlacement({1, 12, 9});
+  t.PrintAllState();
+  t.InputPlacement({1, 14, 5});
+  t.PrintAllState();
+  */
 }
 
 #endif
