@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import sys, random, time, os.path, socketserver
+import sys, random, time, os.path, socketserver, argparse, math
 import numpy as np, torch
 from torch.distributions import Categorical
 
@@ -11,6 +11,15 @@ from model import Model, ConvBlock, obs_to_torch
 from config import Configs
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+hz_avg = 12
+hz_dev = 0
+microadj_delay = 21
+start_level = 18
+drought_mode = False
+penalty = 0.0
+search_enable = False
+first_gain = 0.0
 
 def GetTorch(game):
     return obs_to_torch(game.GetState(), device).unsqueeze(0)
@@ -56,6 +65,45 @@ class GameConn(socketserver.BaseRequestHandler):
             ss += s + ' '
         print(ss)
 
+    def stepNoSearchAndSend(self, game):
+        game.InputPlacement(*GetStrat(model, game), False)
+        seq = game.GetMicroadjSequence()
+        self.request.send(self.gen_seq(seq))
+        game.InputPlacement(*GetStrat(model, game), False)
+        seq = game.GetPlannedSequence()
+        self.request.send(self.gen_seq(seq))
+
+    def stepAndSend(self, game):
+        def searchCallback(state, place_stage, return_value):
+            with torch.no_grad():
+                states = obs_to_torch(state, device)
+                if return_value:
+                    return model(states, False)[1].tolist()
+                else:
+                    k = 1 if not place_stage and microadj_delay == 61 else 3
+                    pi = model(states, False)[0]
+                    ret = torch.topk(pi, k)[1].tolist()
+                    for i, x in enumerate(ret):
+                        while len(ret[i]) > 0:
+                            if pi[i, x[-1]] == -math.inf:
+                                x.pop()
+                            else:
+                                break
+                    return ret
+
+        search_limit = 322
+        if start_level == 29 and microadj_delay >= 20: search_limit = 0
+        elif drought_mode or microadj_delay >= 20: search_limit = 222
+        if search_enable and game.GetLines() < search_limit:
+            w = game.Search(searchCallback, first_gain)
+            if w is None:
+                self.stepNoSearchAndSend(game)
+            else:
+                self.request.send(self.gen_seq(w[0]))
+                self.request.send(self.gen_seq(w[1]))
+        else:
+            self.stepNoSearchAndSend(game)
+
     def handle(self):
         print('connected')
         game = tetris.Tetris(159263)
@@ -63,41 +111,27 @@ class GameConn(socketserver.BaseRequestHandler):
             try:
                 data = self.read_until(1)
                 if data[0] == 0xff:
-                    cur, nxt, level = self.read_until(3)
+                    cur, nxt, _ = self.read_until(3)
                     # adjustable: hz_dev, hz_dev, microadj_delay, drought_mode, start_level, game_over_penalty
-                    st = {'hz_avg': 12, 'hz_dev': 0, 'microadj_delay': 21, 'drought_mode': True,
-                          'start_level': level, 'game_over_penalty': -1.0}
+                    st = {'hz_avg': hz_avg, 'hz_dev': hz_dev, 'microadj_delay': microadj_delay,
+                          'drought_mode': drought_mode, 'start_level': start_level,
+                          'game_over_penalty': penalty}
                     game.ResetGame(**st)
                     print()
                     print()
                     print('Current game:')
-                    print('Start level: {}, drought mode: {}'.format(level, st['drought_mode']))
+                    print('Start level: {}, drought mode: {}'.format(start_level, st['drought_mode']))
                     print('Game over penalty:', st['game_over_penalty'])
                     print('Tapping speed:', 'NormalDistribution({}, {})'.format(st['hz_avg'], st['hz_dev']) if st['hz_dev'] > 0 else 'constant {}'.format(st['hz_avg']), 'Hz')
                     print('Microadjustment delay:', st['microadj_delay'], 'frames', flush = True)
                     game.SetNowPiece(cur)
                     game.SetNextPiece(nxt)
-                    game.InputPlacement(*GetStrat(model, game), False)
-                    seq = game.GetMicroadjSequence()
-                    # self.print_seq(seq)
-                    self.request.send(self.gen_seq(seq))
-                    game.InputPlacement(*GetStrat(model, game), False)
-                    seq = game.GetPlannedSequence()
-                    # self.print_seq(seq)
-                    self.request.send(self.gen_seq(seq))
+                    self.stepAndSend(game)
                 elif data[0] == 0xfd:
                     r, x, y, nxt = self.read_until(4)
                     game.SetPreviousPlacement(r, x, y)
                     game.SetNextPiece(nxt)
-                    # game.PrintState()
-                    game.InputPlacement(*GetStrat(model, game), False)
-                    seq = game.GetMicroadjSequence()
-                    # self.print_seq(seq)
-                    self.request.send(self.gen_seq(seq))
-                    game.InputPlacement(*GetStrat(model, game), False)
-                    seq = game.GetPlannedSequence()
-                    # self.print_seq(seq)
-                    self.request.send(self.gen_seq(seq))
+                    self.stepAndSend(game)
             except ConnectionResetError:
                 self.request.close()
                 break
@@ -105,10 +139,31 @@ class GameConn(socketserver.BaseRequestHandler):
                 pass
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('model')
+    parser.add_argument('--hz-avg', type = float)
+    parser.add_argument('--hz-dev', type = float)
+    parser.add_argument('--microadj-delay', type = int)
+    parser.add_argument('--start-level', type = int)
+    parser.add_argument('--game-over-penalty', type = float)
+    parser.add_argument('--drought-mode', action = 'store_true')
+    parser.add_argument('--first-gain', type = float)
+    args = parser.parse_args()
+    print(args)
+    if args.hz_avg is not None: hz_avg = args.hz_avg
+    if args.hz_dev is not None: hz_dev = args.hz_dev
+    if args.microadj_delay is not None: microadj_delay = args.microadj_delay
+    if args.start_level is not None: start_level = args.start_level
+    if args.game_over_penalty is not None: penalty = args.game_over_penalty
+    if args.first_gain is not None:
+        first_gain = args.first_gain
+        search_enable = first_gain >= 0
+    drought_mode = args.drought_mode
+    
     with torch.no_grad():
         c = Configs()
         model = Model(c.channels, c.blocks).to(device)
-        model_path = os.path.join(os.path.dirname(sys.argv[0]), 'models/model.pth') if len(sys.argv) <= 1 else sys.argv[1]
+        model_path = args.model
         if model_path[-3:] == 'pkl': model.load_state_dict(torch.load(model_path)[0].state_dict())
         else: model.load_state_dict(torch.load(model_path))
         model.eval()

@@ -1600,12 +1600,13 @@ static std::vector<double> PyObjectToValueTable(PyObject* obj) {
 
 static PyObject* Tetris_Search(Tetris* self, PyObject* args, PyObject* kwds) {
   // place stage should be false (microadj phase)
-  static const char *kwlist[] = {"func", nullptr};
-  // func(states: ndarray, return_value: bool) ->
+  static const char *kwlist[] = {"func", "first_gain", nullptr};
+  // func(states: ndarray, place_stage: bool, return_value: bool) ->
   //     Union[List[List[int]], List[float]]
   // return likely policy list (r*200+x*10+y) if return_value == false, values otherwise
   PyObject* func;
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", (char**)kwlist, &func)) {
+  double first_gain = 0;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|d", (char**)kwlist, &func, &first_gain)) {
     return nullptr;
   }
   if (!PyCallable_Check(func)) {
@@ -1632,7 +1633,7 @@ static PyObject* Tetris_Search(Tetris* self, PyObject* args, PyObject* kwds) {
   try {
     // First (micro search)
     PyObject* state_arr = StatesPyObject({self->GetState()});
-    PyObject* arglist = Py_BuildValue("(OO)", state_arr, Py_False);
+    PyObject* arglist = Py_BuildValue("(OOO)", state_arr, Py_False, Py_False);
     PyObject* result = PyObject_CallObject(func, arglist);
     Py_DECREF(state_arr);
     Py_DECREF(arglist);
@@ -1647,19 +1648,21 @@ static PyObject* Tetris_Search(Tetris* self, PyObject* args, PyObject* kwds) {
       PyErr_SetString(PyExc_ValueError, "Incorrect policy length");
       return nullptr;
     }
+    bool flag = true;
     for (int move : moves[0]) {
       Tetris tmp_game = *self;
       double reward = tmp_game.InputPlacement(ToPlacement(move));
       if (!tmp_game.GetPlaceStage() || tmp_game.IsOver()) continue;
-      first_steps.push_back({tmp_game.GetMicroadjSequence(), reward});
+      first_steps.push_back({tmp_game.GetMicroadjSequence(), reward + flag * first_gain});
       first_state.push_back(tmp_game.GetState());
       first_games.push_back(std::move(tmp_game));
+      flag = false;
     }
     if (first_games.empty()) Py_RETURN_NONE;
 
     // Second (next search)
     state_arr = StatesPyObject(first_state);
-    arglist = Py_BuildValue("(OO)", state_arr, Py_False);
+    arglist = Py_BuildValue("(OOO)", state_arr, Py_True, Py_False);
     result = PyObject_CallObject(func, arglist);
     Py_DECREF(state_arr);
     Py_DECREF(arglist);
@@ -1672,14 +1675,16 @@ static PyObject* Tetris_Search(Tetris* self, PyObject* args, PyObject* kwds) {
       return nullptr;
     }
     for (size_t i = 0; i < first_games.size(); i++) {
+      bool flag = true;
       for (int move : moves[i]) {
         Result res;
         res.game = first_games[i];
-        res.reward = res.game.InputPlacement(ToPlacement(move)) + first_steps[i].second;
+        res.reward = res.game.InputPlacement(ToPlacement(move)) + first_steps[i].second + flag * first_gain;
         if (res.game.GetPlaceStage() || res.game.IsOver()) continue;
         res.adj = first_steps[i].first;
         res.nxt = res.game.GetPlannedSequence();
         all_games.push_back(std::move(res));
+        flag = false;
       }
     }
     if (all_games.empty()) Py_RETURN_NONE;
@@ -1694,7 +1699,7 @@ static PyObject* Tetris_Search(Tetris* self, PyObject* args, PyObject* kwds) {
     for (auto& i : all_games) states.push_back(i.game.GetState());
 
     PyObject* state_arr = StatesPyObjectWithNextPiece(states);
-    PyObject* arglist = Py_BuildValue("(OO)", state_arr, Py_True);
+    PyObject* arglist = Py_BuildValue("(OOO)", state_arr, Py_False, Py_True);
     PyObject* result = PyObject_CallObject(func, arglist);
     Py_DECREF(state_arr);
     Py_DECREF(arglist);

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
-import numpy as np, torch, sys, random, time, os.path
+import numpy as np, torch, sys, random, time, os.path, math
 from torch.distributions import Categorical
 
 import tetris
@@ -18,6 +18,7 @@ microadj_delay = 21
 start_level = 18
 drought_mode = False
 penalty = 0.0
+first_gain = 0.0
 
 def ResetGame(game):
     game.ResetGame(hz_avg = hz_avg, hz_dev = hz_dev, drought_mode = drought_mode,
@@ -25,7 +26,7 @@ def ResetGame(game):
                    game_over_penalty = penalty)
 
 def GetSeed(i):
-    return (i * 1242973851)
+    return (i * 42973851 + 35)
 
 @torch.no_grad()
 def Main(model_path):
@@ -37,36 +38,40 @@ def Main(model_path):
     else: model.load_state_dict(torch.load(model_path))
     model.eval()
 
-    batch_size = 100
-    n = 500
-    games = [tetris.Tetris(GetSeed(i)) for i in range(batch_size)]
-    for i in games: ResetGame(i)
-    started = batch_size
+    def SearchCallback(state, place_stage, return_value):
+        with torch.no_grad():
+            states = obs_to_torch(state, device)
+            if return_value:
+                return model(states, False)[1].tolist()
+            else:
+                k = 1 if not place_stage and microadj_delay == 61 else 3
+                pi = model(states, False)[0]
+                ret = torch.topk(pi, k)[1].tolist()
+                for i, x in enumerate(ret):
+                    while len(ret[i]) > 0:
+                        if pi[i, x[-1]] == -math.inf:
+                            x.pop()
+                        else:
+                            break
+                return ret
+
+    n = 100
     results = []
-    rewards = [0. for i in range(batch_size)]
-    is_running = [True for i in range(batch_size)]
-    while len(results) < n:
-        states = [i.GetState() for i, j in zip(games, is_running) if j]
-        states = obs_to_torch(np.stack(states), device)
-        pi = model(states, False)[0]
-        pi = torch.argmax(pi, 1)
-        j = 0
-        for i in range(batch_size):
-            if not is_running[i]: continue
-            action = pi[j].item()
-            j += 1
-            r, x, y = action // 200, action // 10 % 20, action % 10
-            rewards[i] += games[i].InputPlacement(r, x, y)
-            if games[i].IsOver():
-                results.append((games[i].GetScore(), games[i].GetLines()))
-                rewards[i] = 0.
-                if started < n:
-                    games[i] = tetris.Tetris(GetSeed(started))
-                    ResetGame(games[i])
-                    started += 1
-                else:
-                    is_running[i] = False
-                if len(results) % 200 == 0: print(len(results), '/', n, 'games started')
+    for i in range(n):
+        print(i, file=sys.stderr)
+        game = tetris.Tetris(GetSeed(i))
+        ResetGame(game)
+        while not (microadj_delay >= 20 and (start_level == 29 or game.GetLines() >= 222)):
+            x = game.Search(SearchCallback, first_gain)
+            if x is None: break
+            # s = torch.argmax(model(obs_to_torch(game.GetState(), device).unsqueeze(0), False)[0], 1).item()
+            # game.InputPlacement(s // 200, s // 10 % 20, s % 10)
+            # if game.IsOver(): break
+        while not game.IsOver():
+            s = torch.argmax(model(obs_to_torch(game.GetState(), device).unsqueeze(0), False)[0], 1).item()
+            game.InputPlacement(s // 200, s // 10 % 20, s % 10)
+        results.append((game.GetScore(), game.GetLines()))
+
     s = list(reversed(sorted([i[0] for i in results])))
     for i in range(len(s) - 1):
         for t in range(2500000, 0, -50000):
@@ -87,6 +92,7 @@ if __name__ == "__main__":
     parser.add_argument('--start-level', type = int)
     parser.add_argument('--game-over-penalty', type = float)
     parser.add_argument('--drought-mode', action = 'store_true')
+    parser.add_argument('--first-gain', type = float)
     args = parser.parse_args()
     print(args)
     if args.hz_avg is not None: hz_avg = args.hz_avg
@@ -94,5 +100,6 @@ if __name__ == "__main__":
     if args.microadj_delay is not None: microadj_delay = args.microadj_delay
     if args.start_level is not None: start_level = args.start_level
     if args.game_over_penalty is not None: penalty = args.game_over_penalty
+    if args.first_gain is not None: first_gain = args.first_gain
     drought_mode = args.drought_mode
     Main(args.model)
