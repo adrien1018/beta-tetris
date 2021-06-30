@@ -64,20 +64,15 @@ class GameConn(socketserver.BaseRequestHandler):
                 data = self.read_until(1)
                 if data[0] == 0xff:
                     cur, nxt, level = self.read_until(3)
-                    # adjustable: reward_multiplier, hz_dev, hz_dev, microadj_delay, target, start_level
-                    st = {'reward_multiplier': 1e-5, 'hz_avg': 12, 'hz_dev': 0, 'microadj_delay': 25, 'start_level': level, 'target': 1200000}
-                    if random.randint(0, 1) == 0:
-                        st['hz_avg'] = 13.5
-                        st['target'] = 1100000
-                    if random.randint(0, 1) == 0:
-                        st['microadj_delay'] = 16
-                    if random.randint(0, 1) == 0:
-                        st['hz_dev'] = 1
+                    # adjustable: hz_dev, hz_dev, microadj_delay, drought_mode, start_level, game_over_penalty
+                    st = {'hz_avg': 12, 'hz_dev': 0, 'microadj_delay': 21, 'drought_mode': True,
+                          'start_level': level, 'game_over_penalty': -1.0}
                     game.ResetGame(**st)
                     print()
                     print()
                     print('Current game:')
-                    print('Start level:', level)
+                    print('Start level: {}, drought mode: {}'.format(level, st['drought_mode']))
+                    print('Game over penalty:', st['game_over_penalty'])
                     print('Tapping speed:', 'NormalDistribution({}, {})'.format(st['hz_avg'], st['hz_dev']) if st['hz_dev'] > 0 else 'constant {}'.format(st['hz_avg']), 'Hz')
                     print('Microadjustment delay:', st['microadj_delay'], 'frames', flush = True)
                     game.SetNowPiece(cur)

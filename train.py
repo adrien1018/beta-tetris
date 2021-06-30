@@ -176,6 +176,7 @@ class Main:
         offset = tracker.get_global_step()
         if offset > 100:
             # If resumed, sample several iterations first to reduce sampling bias
+            self.generator.SendModel(self.model)
             for i in range(16): self.generator.StartGenerate(offset)
             tracker.save() # increment step
         else:

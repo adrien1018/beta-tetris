@@ -5,6 +5,7 @@
 #include <random>
 #include <vector>
 #include <utility>
+#include <stdexcept>
 #include <algorithm>
 #include <unordered_map>
 
@@ -849,8 +850,15 @@ class Tetris {
   bool IsOver() const { return game_over_; }
   int GetScore() const { return score_; }
   int GetLines() const { return lines_ - start_lines_; }
+  bool GetPlaceStage() const { return place_stage_; }
   std::pair<int, int> GetTetrisStat() const {
     return {tetris_count_, right_tetris_count_};
+  }
+
+  const int* GetNextPieceDistribution() const {
+    const auto probs = drought_mode_ ? kTransitionProbDrought_ :
+        kTransitionProb_;
+    return probs[next_piece_];
   }
 
   State GetState() const {
@@ -1529,6 +1537,200 @@ static PyObject* Tetris_GetMicroadjSequence(Tetris* self, PyObject* args, PyObje
   return SequencePyObject(self->GetMicroadjSequence(truncate));
 }
 
+static PyObject* StatesPyObject(const std::vector<Tetris::State>& states) {
+  if (states.size() == 0) return nullptr;
+  constexpr size_t kItemSize = sizeof(Tetris::State);
+  npy_intp dims[] = {(long)states.size(), (long)states[0].size(), Tetris::kN, Tetris::kM};
+  PyObject* ret = PyArray_SimpleNew(4, dims, NPY_FLOAT32);
+  uint8_t* dest = (uint8_t*)PyArray_DATA((PyArrayObject*)ret);
+  for (size_t i = 0; i < states.size(); i++) {
+    memcpy(dest + kItemSize * i, states[i].data(), kItemSize);
+  }
+  return ret;
+}
+
+static PyObject* StatesPyObjectWithNextPiece(const std::vector<Tetris::State>& states) {
+  if (states.size() == 0) return nullptr;
+  constexpr size_t kItemSize = sizeof(Tetris::State);
+  npy_intp dims[] = {(long)states.size() * 7, (long)states[0].size(), Tetris::kN, Tetris::kM};
+  PyObject* ret = PyArray_SimpleNew(4, dims, NPY_FLOAT32);
+  uint8_t* dest = (uint8_t*)PyArray_DATA((PyArrayObject*)ret);
+  for (size_t i = 0; i < states.size(); i++) {
+    Tetris::State tmp_state = states[i];
+    float* misc = (float*)tmp_state[13].data();
+    // 7-14: next / 7(if place_stage_)
+    for (size_t j = 7; j <= 14; j++) misc[j] = 0;
+    for (size_t j = 0; j < 7; j++) {
+      misc[j + 7] = 1;
+      memcpy(dest + kItemSize * (i * 7 + j), tmp_state.data(), kItemSize);
+    }
+  }
+  return ret;
+}
+
+static std::vector<std::vector<int>> PyObjectToMoveTable(PyObject* obj) {
+  if (!PyList_Check(obj)) throw std::runtime_error("");
+  size_t n = PyList_Size(obj);
+  std::vector<std::vector<int>> ret(n);
+  for (size_t i = 0; i < n; i++) {
+    PyObject* row = PyList_GetItem(obj, i);
+    if (!PyList_Check(row)) throw std::runtime_error("");
+    size_t m = PyList_Size(row);
+    ret[i].resize(m);
+    for (size_t j = 0; j < m; j++) {
+      PyObject* item = PyList_GetItem(row, j);
+      if (!PyLong_Check(item)) throw std::runtime_error("");
+      ret[i][j] = PyLong_AsLong(item);
+    }
+  }
+  return ret;
+}
+
+static std::vector<double> PyObjectToValueTable(PyObject* obj) {
+  if (!PyList_Check(obj)) throw std::runtime_error("");
+  size_t n = PyList_Size(obj);
+  std::vector<double> ret(n);
+  for (size_t i = 0; i < n; i++) {
+    PyObject* item = PyList_GetItem(obj, i);
+    if (!PyFloat_Check(item)) throw std::runtime_error("");
+    ret[i] = PyFloat_AsDouble(item);
+  }
+  return ret;
+}
+
+static PyObject* Tetris_Search(Tetris* self, PyObject* args, PyObject* kwds) {
+  // place stage should be false (microadj phase)
+  static const char *kwlist[] = {"func", nullptr};
+  // func(states: ndarray, return_value: bool) ->
+  //     Union[List[List[int]], List[float]]
+  // return likely policy list (r*200+x*10+y) if return_value == false, values otherwise
+  PyObject* func;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", (char**)kwlist, &func)) {
+    return nullptr;
+  }
+  if (!PyCallable_Check(func)) {
+    PyErr_SetString(PyExc_TypeError, "func must be callable");
+    return nullptr;
+  }
+  if (self->GetPlaceStage()) {
+    PyErr_SetString(PyExc_ValueError, "place stage incorrect");
+    return nullptr;
+  }
+  const int* next_piece_dist = self->GetNextPieceDistribution();
+  int next_piece_denom = 0;
+  for (int i = 0; i < Tetris::kT; i++) next_piece_denom += next_piece_dist[i];
+
+  struct Result {
+    Tetris game;
+    Tetris::FrameSequence adj, nxt;
+    double reward;
+  };
+  auto ToPlacement = [](int x) {
+    return Tetris::Position{x / 200, x / 10 % 20, x % 10};
+  };
+  std::vector<Result> all_games;
+  try {
+    // First (micro search)
+    PyObject* state_arr = StatesPyObject({self->GetState()});
+    PyObject* arglist = Py_BuildValue("(OO)", state_arr, Py_False);
+    PyObject* result = PyObject_CallObject(func, arglist);
+    Py_DECREF(state_arr);
+    Py_DECREF(arglist);
+    if (!result) return nullptr;
+
+    std::vector<Tetris> first_games;
+    std::vector<Tetris::State> first_state;
+    std::vector<std::pair<Tetris::FrameSequence, double>> first_steps;
+    auto moves = PyObjectToMoveTable(result);
+    Py_DECREF(result);
+    if (moves.size() != 1) {
+      PyErr_SetString(PyExc_ValueError, "Incorrect policy length");
+      return nullptr;
+    }
+    for (int move : moves[0]) {
+      Tetris tmp_game = *self;
+      double reward = tmp_game.InputPlacement(ToPlacement(move));
+      if (!tmp_game.GetPlaceStage() || tmp_game.IsOver()) continue;
+      first_steps.push_back({tmp_game.GetMicroadjSequence(), reward});
+      first_state.push_back(tmp_game.GetState());
+      first_games.push_back(std::move(tmp_game));
+    }
+    if (first_games.empty()) Py_RETURN_NONE;
+
+    // Second (next search)
+    state_arr = StatesPyObject(first_state);
+    arglist = Py_BuildValue("(OO)", state_arr, Py_False);
+    result = PyObject_CallObject(func, arglist);
+    Py_DECREF(state_arr);
+    Py_DECREF(arglist);
+    if (!result) return nullptr;
+
+    moves = PyObjectToMoveTable(result);
+    Py_DECREF(result);
+    if (moves.size() != first_games.size()) {
+      PyErr_SetString(PyExc_ValueError, "Incorrect policy length");
+      return nullptr;
+    }
+    for (size_t i = 0; i < first_games.size(); i++) {
+      for (int move : moves[i]) {
+        Result res;
+        res.game = first_games[i];
+        res.reward = res.game.InputPlacement(ToPlacement(move)) + first_steps[i].second;
+        if (res.game.GetPlaceStage() || res.game.IsOver()) continue;
+        res.adj = first_steps[i].first;
+        res.nxt = res.game.GetPlannedSequence();
+        all_games.push_back(std::move(res));
+      }
+    }
+    if (all_games.empty()) Py_RETURN_NONE;
+  } catch (std::runtime_error&) {
+    PyErr_SetString(PyExc_ValueError, "func should return List[List[int]]");
+    return nullptr;
+  }
+
+  std::vector<double> expected_rewards;
+  try {
+    std::vector<Tetris::State> states;
+    for (auto& i : all_games) states.push_back(i.game.GetState());
+
+    PyObject* state_arr = StatesPyObjectWithNextPiece(states);
+    PyObject* arglist = Py_BuildValue("(OO)", state_arr, Py_True);
+    PyObject* result = PyObject_CallObject(func, arglist);
+    Py_DECREF(state_arr);
+    Py_DECREF(arglist);
+    if (!result) return nullptr;
+
+    auto values = PyObjectToValueTable(result);
+    Py_DECREF(result);
+    if (values.size() != all_games.size() * 7) {
+      PyErr_SetString(PyExc_ValueError, "Incorrect value length");
+      return nullptr;
+    }
+    for (size_t i = 0; i < all_games.size(); i++) {
+      double sum = 0;
+      for (size_t j = 0; j < 7; j++) {
+        sum += values[i * 7 + j] * next_piece_dist[j];
+      }
+      expected_rewards.push_back(all_games[i].reward + sum / next_piece_denom);
+    }
+  } catch (std::runtime_error&) {
+    PyErr_SetString(PyExc_ValueError, "func should return List[float]");
+    return nullptr;
+  }
+
+  size_t idx =
+      std::max_element(expected_rewards.begin(), expected_rewards.end()) -
+      expected_rewards.begin();
+  auto& res = all_games[idx];
+  *self = res.game;
+  PyObject* ret1 = SequencePyObject(res.adj);
+  PyObject* ret2 = SequencePyObject(res.nxt);
+  PyObject* ret = PyTuple_Pack(2, ret1, ret2);
+  Py_DECREF(ret1);
+  Py_DECREF(ret2);
+  return ret;
+}
+
 #ifdef DEBUG_METHODS
 
 static PyObject* Tetris_PrintState(Tetris* self, PyObject* Py_UNUSED(ignored)) {
@@ -1575,6 +1777,8 @@ static PyMethodDef py_tetris_methods[] = {
      METH_VARARGS | METH_KEYWORDS, "Set the next piece"},
     {"SetState", (PyCFunction)Tetris_SetState, METH_VARARGS | METH_KEYWORDS,
      "Set the game board & state"},
+    {"Search", (PyCFunction)Tetris_Search, METH_VARARGS | METH_KEYWORDS,
+     "Search for the best move and make it"},
 #ifdef DEBUG_METHODS
     {"PrintState", (PyCFunction)Tetris_PrintState, METH_NOARGS,
      "Print state array"},

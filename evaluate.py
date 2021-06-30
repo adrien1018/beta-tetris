@@ -69,7 +69,7 @@ def Main(model_path):
                 if len(results) % 200 == 0: print(len(results), '/', n, 'games started')
     s = list(reversed(sorted([i[0] for i in results])))
     for i in range(len(s) - 1):
-        for t in range(2000000, 0, -50000):
+        for t in range(2500000, 0, -50000):
             if s[i] >= t and s[i+1] < t: print(t, (i + 1) / n)
     print(np.mean(s), np.std(s))
     s = list(reversed(sorted([i[1] for i in results])))
@@ -81,22 +81,18 @@ def Main(model_path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('model')
-    parser.add_argument('--reward-multiplier', type = float)
     parser.add_argument('--hz-avg', type = float)
     parser.add_argument('--hz-dev', type = float)
     parser.add_argument('--microadj-delay', type = int)
     parser.add_argument('--start-level', type = int)
-    parser.add_argument('--target', type = int)
     parser.add_argument('--game-over-penalty', type = float)
     parser.add_argument('--drought-mode', action = 'store_true')
     args = parser.parse_args()
     print(args)
-    if args.reward_multiplier is not None: reward_multiplier = args.reward_multiplier
     if args.hz_avg is not None: hz_avg = args.hz_avg
     if args.hz_dev is not None: hz_dev = args.hz_dev
     if args.microadj_delay is not None: microadj_delay = args.microadj_delay
     if args.start_level is not None: start_level = args.start_level
-    if args.target is not None: target = args.target
     if args.game_over_penalty is not None: penalty = args.game_over_penalty
     drought_mode = args.drought_mode
     Main(args.model)
