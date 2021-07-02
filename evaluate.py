@@ -24,8 +24,10 @@ def ResetGame(game):
                    microadj_delay = microadj_delay, start_level = start_level,
                    game_over_penalty = penalty)
 
+#def GetSeed(i):
+#    return (i * 1242973851 + 1)
 def GetSeed(i):
-    return (i * 1242973851)
+    return (i * 42973851 + 35)
 
 @torch.no_grad()
 def Main(model_path):
@@ -38,7 +40,7 @@ def Main(model_path):
     model.eval()
 
     batch_size = 100
-    n = 500
+    n = 2000
     games = [tetris.Tetris(GetSeed(i)) for i in range(batch_size)]
     for i in games: ResetGame(i)
     started = batch_size
@@ -68,6 +70,7 @@ def Main(model_path):
                     is_running[i] = False
                 if len(results) % 200 == 0: print(len(results), '/', n, 'games started')
     s = list(reversed(sorted([i[0] for i in results])))
+    print(s)
     for i in range(len(s) - 1):
         for t in range(2500000, 0, -50000):
             if s[i] >= t and s[i+1] < t: print(t, (i + 1) / n)

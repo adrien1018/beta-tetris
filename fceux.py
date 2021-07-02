@@ -93,7 +93,8 @@ class GameConn(socketserver.BaseRequestHandler):
 
         search_limit = 322
         if start_level == 29 and microadj_delay >= 20: search_limit = 0
-        elif drought_mode or microadj_delay >= 20: search_limit = 222
+        elif drought_mode: search_limit = 222
+        elif microadj_delay >= 20: search_limit = 222
         if search_enable and game.GetLines() < search_limit:
             w = game.Search(searchCallback, first_gain)
             if w is None:

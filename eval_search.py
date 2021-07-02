@@ -55,13 +55,18 @@ def Main(model_path):
                             break
                 return ret
 
-    n = 100
+    search_limit = 322
+    if start_level == 29 and microadj_delay >= 20: search_limit = 0
+    elif drought_mode: search_limit = 222
+    elif microadj_delay >= 20: search_limit = 222
+
+    n = 500
     results = []
     for i in range(n):
-        print(i, file=sys.stderr)
+        if i % 5 == 0: print(i, file=sys.stderr)
         game = tetris.Tetris(GetSeed(i))
         ResetGame(game)
-        while not (microadj_delay >= 20 and (start_level == 29 or game.GetLines() >= 222)):
+        while game.GetLines() < search_limit:
             x = game.Search(SearchCallback, first_gain)
             if x is None: break
             # s = torch.argmax(model(obs_to_torch(game.GetState(), device).unsqueeze(0), False)[0], 1).item()
@@ -73,6 +78,7 @@ def Main(model_path):
         results.append((game.GetScore(), game.GetLines()))
 
     s = list(reversed(sorted([i[0] for i in results])))
+    print(s)
     for i in range(len(s) - 1):
         for t in range(2500000, 0, -50000):
             if s[i] >= t and s[i+1] < t: print(t, (i + 1) / n)
