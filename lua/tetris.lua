@@ -55,7 +55,7 @@ function startGame(level)
       break
     elseif now < 5 then
       joypad.set(1, {down=true})
-    elseif now < x then  
+    elseif now < x then
       joypad.set(1, {right=true})
     else
       joypad.set(1, {left=true})
@@ -261,13 +261,17 @@ end
 tcp:settimeout(0.007, 't')
 
 emu.addgamegenie("XNEOOGEX")
+--emu.addgamegenie("GPVEPKZA")
+--emu.addgamegenie("TAOPOPYA")
+--emu.addgamegenie("APOPXPEY")
 emu.poweron()
 enterFromCopyright()
 
+-- To play 29 starts, use level = 19 and enable GPVEPKZA.
+level = 18
+
 while true do
-  startGame(18)
-  gameLoop(tcp, 18)
-  startGame(19)
-  gameLoop(tcp, 19)
+  startGame(level)
+  gameLoop(tcp, level)
 end
 
