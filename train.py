@@ -4,7 +4,6 @@
 
 import sys, traceback, os, collections, math, time
 from typing import Dict, List
-from sortedcontainers import SortedList
 
 import numpy as np, torch
 from torch import optim

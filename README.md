@@ -34,7 +34,7 @@ Available parameters are listed below:
 | `microadj-delay` | 8,16,21,25,61 | frames |
 | `drought-mode` | (specify or not) | Game genie code: `TAOPOPYA` `APOPXPEY` |
 | `game-over-penalty` | 0,-0.1,-1 | Adjust aggression |
-| `first-gain` | -1 or >=0 | Additional value given to the actor output. Resonable value range is 0.03 to 0.1. -1 to disable move search. |
+| `first-gain` | -1 or >=0 | Additional value given to the actor output when doing 1-ply move search. Resonable value range is 0.02 to 0.1. -1 to disable move search. |
 
 ## Parameters & Statistics
 
