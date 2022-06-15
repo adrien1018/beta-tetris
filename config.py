@@ -6,10 +6,10 @@ from labml.configs import BaseConfigs, FloatDynamicHyperParam
 class Configs(BaseConfigs):
     # #### Configurations
     # $\gamma$ and $\lambda$ for advantage calculation
-    gamma: float = FloatDynamicHyperParam(0.99, range_ = (0.98, 1))
-    lamda: float = FloatDynamicHyperParam(0.94, range_ = (0.9, 1))
+    gamma: float = FloatDynamicHyperParam(0.999, range_ = (0.98, 1))
+    lamda: float = FloatDynamicHyperParam(0.93, range_ = (0.9, 1))
     # number of updates
-    updates: int = 100000
+    updates: int = 200000
     # number of epochs to train the model with sampled data
     epochs: int = 1
     # number of worker processes
@@ -20,7 +20,7 @@ class Configs(BaseConfigs):
     # size of mini batches
     n_update_per_epoch: int = 32
     mini_batch_size: int = 1024
-    channels: int = 128
+    channels: int = 192
     blocks: int = 8
     lr: float = FloatDynamicHyperParam(1e-4, range_ = (0, 1e-3))
     clipping_range: float = 0.2

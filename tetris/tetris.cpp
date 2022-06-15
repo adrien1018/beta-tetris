@@ -143,19 +143,19 @@ class Tetris {
 
   // Reward model
   static constexpr double kRewardMultiplier_ = 1e-5; // 10 per maxout
-  static constexpr double kStepReward_ = 2e-5;
+  static constexpr double kStepReward_ = 5e-4; // 100 points/piece
   // A very small reward given to every half-rounds. Used to guide the very
   //   early stage of training.
   static constexpr double kInvalidReward_ = -0.3;
   // Provide a large reward deduction if the agent makes an invalid placement
-  static constexpr double kInfeasibleReward_ = -0.004;
+  static constexpr double kInfeasibleReward_ = -0.01;
   // Provide a large reward deduction if the agent makes an infeasible placement
   // "Infeasible" placements are those cannot be done by +3σ tapping speeds
   //   (750-in-1 chance) and without misdrop
   static constexpr double kMisdropReward_ = -0.001;
   // Provide a small reward deduction each time the agent makes an misdrop;
   //   this can guide the agent to avoid high-risk movements
-  static constexpr double kBottomGain_ = 0.4;
+  static constexpr double kBottomGain_ = 0.1;
   // Provide a reward gain for bottom row scoring to guide the agent to not
   //   score dirty tetrises.
   double right_gain_ = 0.2;
@@ -581,6 +581,10 @@ class Tetris {
     return true;
   }
 
+  void CheckLineLimit_() {
+    if (lines_ >= 230) game_over_ = true;
+  }
+
   // needed: StoreMap_(true) (stored_mp_, stored_mp_lb_), temp_lines_
   double SetPlannedPlacement_(const Position& pos) {
     MoveSequence seq = GetMoveSequence_(stored_mp_, stored_mp_lb_, kStartPosition_, pos);
@@ -689,7 +693,7 @@ class Tetris {
                                    real_lines > 0);
     pieces_++;
     double score_reward = kRewardMultiplier_ * score_delta;
-    if (pos.y == 9) score_reward *= 1 + right_gain_;
+    if (pos.y == 9 && level < 29) score_reward *= 1 + right_gain_;
     if (pos.x >= 18) score_reward *= 1 + kBottomGain_;
     reward += score_reward + kStepReward_;
     real_placement_set_ = false;
@@ -718,7 +722,7 @@ class Tetris {
     StoreMap_(false);
     game_over_ = MapEmpty_(stored_mp_lb_);
     // prevent game from going indefinitely
-    if (lines_ >= 330 || ((start_level_ == 29 || drought_mode_) && lines_ >= 230)) game_over_ = true;
+    CheckLineLimit_();
     real_placement_set_ = true;
     return true;
   }
@@ -772,55 +776,38 @@ class Tetris {
     constexpr double hz_table[] = {12, 13.5, 15, 20, 30};
     constexpr double start_level_table[] = {18, 19, 29};
     constexpr int adj_delay_table[] = {8, 16, 21, 25, 61};
-    constexpr double penalty_table[] = {0, -0.1, -1.0};
+    constexpr double penalty_table[] = {-1.0, -10.0};
     int hz_ind = IntRand(0, 4)(rng_);
     int start_level = start_level_table[IntRand(0, 2)(rng_)];
     double hz_avg = hz_table[hz_ind];
-    double hz_dev = IntRand(0, 2)(rng_) ? 0 : 1;
+    double hz_dev = 0; // IntRand(0, 2)(rng_) ? 0 : 1;
     int microadj_delay = adj_delay_table[IntRand(0, 4)(rng_)];
-    double game_over_penalty = penalty_table[IntRand(0, 2)(rng_)];
+    double game_over_penalty = -2.0; //penalty_table[IntRand(0, 1)(rng_)];
     int start_lines = 0;
     bool drought_mode = IntRand(0, 2)(rng_) == 0;
-    // more training data for several formats
-    if (IntRand(0, 9)(rng_) < 3) {
-      switch (IntRand(0, 3)(rng_)) {
-        case 0: hz_avg = 12, hz_dev = 0, start_level = 18, microadj_delay = 21, drought_mode = false; break;
-        case 1: hz_avg = 30, hz_dev = 0, start_level = 19, microadj_delay = 8, drought_mode = false; break;
-        case 2: hz_avg = 12, hz_dev = 0, start_level = 18, microadj_delay = 21, drought_mode = true; break;
-        default: hz_avg = 20, hz_dev = 0, start_level = 29, microadj_delay = 61, drought_mode = false;
-      }
+    if (IntRand(0, 1)(rng_)) {
+      hz_avg = IntRand(0, 1)(rng_) ? 12 : 20;
+      microadj_delay = IntRand(0, 1)(rng_) ? 21 : 25;
     }
     if (RealRand(0, 1)(rng_) < pre_trans) {
       // pre-transition training
       int rnd = IntRand(0, 19)(rng_), rnd2 = IntRand(0, 3)(rng_);
-      if (drought_mode) {
-        if (start_level == 18) {
-          if (rnd >= 17) {
-            start_lines = 205 + rnd2; // 230-25
-          } else if (rnd >= 11) {
-            start_lines = 105 + rnd2; // 130-25
-          }
-        } else {
-          if (rnd >= 12) start_lines = 205 + rnd2;
-        }
-      } else if (start_level == 18) {
-        if (rnd >= 18) {
-          start_lines = 305 + rnd2; // 330-25
-        } else if (rnd >= 15) {
+      if (start_level == 18) {
+        if (rnd >= 13) {
           start_lines = 205 + rnd2; // 230-25
-        } else if (rnd >= 11) {
+        } else {
           start_lines = 105 + rnd2; // 130-25
         }
       } else if (start_level == 19) {
-        if (rnd >= 17) {
-          start_lines = 305 + rnd2;
-        } else if (rnd >= 12) {
-          start_lines = 205 + rnd2;
-        }
-      } else if (start_level == 29) {
-        if (rnd >= 15) start_lines = 205 + rnd2;
+        start_lines = 205 + rnd2;
       }
     }
+    /*{ // killscreen only
+      hz_avg = IntRand(0,1)(rng_) ? 12 : 13.5;
+      if (start_level != 29) {
+        start_lines = 210 + IntRand(0, 5)(rng_);
+      }
+    }*/
     ResetGame(start_level, hz_avg, hz_dev, microadj_delay, start_lines,
               drought_mode, game_over_penalty, right_gain, penalty_multiplier);
   }
@@ -917,8 +904,7 @@ class Tetris {
     //   26-35: 1-10
     //   36-38: 11-19 (3)
     //   39: 20~ (5)
-    int lines_to_next = level >= 29 ?
-        (start_level_ == 29 ? 230 - lines : 330 - lines) :
+    int lines_to_next = level >= 29 ? 1000 - lines :
         (level == 18 ? 130 - lines : 230 - lines);
     if (lines_to_next <= 10) {
       misc[26 + (lines_to_next - 1)] = 1;
@@ -954,12 +940,12 @@ class Tetris {
       misc[50] = 1; // 8
     }
     // 51-53: game_over_penalty
-    if (game_over_penalty_ >= -0.001) {
+    if (game_over_penalty_ >= -0.3) {
       misc[51] = 1; // 0
-    } else if (game_over_penalty_ >= -0.5) {
-      misc[52] = 1; // 0.1
+    } else if (game_over_penalty_ >= -3) {
+      misc[52] = 1; // 1
     } else {
-      misc[53] = 1; // 1
+      misc[53] = 1; // 5
     }
     // 54: prev_misdrop
     misc[54] = !place_stage_ && prev_misdrop_;
@@ -993,7 +979,7 @@ class Tetris {
     }
     double ret = InputPlacement_(pos);
     if (training && orig_stage && !place_stage_) TrainingSetPlacement();
-    if (game_over_) ret += game_over_penalty_ * penalty_multiplier_;
+    if (game_over_) ret += game_over_penalty_;
     return ret;
   }
 
@@ -1056,7 +1042,7 @@ class Tetris {
     place_stage_ = false;
     StoreMap_(false);
     game_over_ = MapEmpty_(stored_mp_lb_);
-    if (lines_ >= 330 || ((start_level_ == 29 || drought_mode_) && lines_ >= 230)) game_over_ = true;
+    CheckLineLimit_();
     // for stage setting only, though real_placement_ is not set (not used)
     real_placement_set_ = true;
     return true;

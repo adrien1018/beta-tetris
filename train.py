@@ -196,7 +196,7 @@ class Main:
                 self.set_game_param(self.c.pre_trans(), self.c.right_gain(), self.c.neg_mul(), self.c.gamma(), self.c.lamda())
                 self.set_weight_param(self.c.entropy_weight())
             if (update + 1) % 25 == 0: logger.log()
-            if (update + 1) % 250 == 0: experiment.save_checkpoint()
+            if (update + 1) % 500 == 0: experiment.save_checkpoint()
 
 import argparse
 

@@ -63,7 +63,7 @@ def Main(model_path):
     n = 500
     results = []
     for i in range(n):
-        if i % 5 == 0: print(i, file=sys.stderr)
+        # if i % 5 == 0: print(i, file=sys.stderr)
         game = tetris.Tetris(GetSeed(i))
         ResetGame(game)
         while game.GetLines() < search_limit:
@@ -76,8 +76,10 @@ def Main(model_path):
             s = torch.argmax(model(obs_to_torch(game.GetState(), device).unsqueeze(0), False)[0], 1).item()
             game.InputPlacement(s // 200, s // 10 % 20, s % 10)
         results.append((game.GetScore(), game.GetLines()))
+        print(game.GetScore(), file=sys.stderr)
 
     s = list(reversed(sorted([i[0] for i in results])))
+    s = [i[0] for i in results]
     print(s)
     for i in range(len(s) - 1):
         for t in range(2500000, 0, -50000):
