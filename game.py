@@ -13,7 +13,7 @@ class Game:
         self.args = (0, False)
         self.env = tetris.Tetris(seed)
         self.pre_trans = 1.
-        self.right_gain = 0.
+        self.left_deduct = 0.
         self.penalty_multiplier = 0.
         self.reset()
 
@@ -40,7 +40,7 @@ class Game:
     def reset(self):
         self.reward = 0.
         self.length = 0.
-        self.env.ResetRandom(self.pre_trans, self.right_gain, self.penalty_multiplier)
+        self.env.ResetRandom(self.pre_trans, self.left_deduct, self.penalty_multiplier)
         return self.env.GetState()
 
 def worker_process(remote, name: str, shms: list, idx: slice, seed: int):
@@ -88,10 +88,10 @@ def worker_process(remote, name: str, shms: list, idx: slice, seed: int):
                 for i in shms: i[0].close()
                 break
             elif cmd == "set_param":
-                pre_trans, gain, penalty_mul = data
+                pre_trans, left_deduct, penalty_mul = data
                 for i in games:
                     i.pre_trans = pre_trans
-                    i.right_gain = gain
+                    i.left_deduct = left_deduct
                     i.penalty_multiplier = penalty_mul
             else:
                 raise NotImplementedError

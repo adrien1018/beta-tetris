@@ -40,7 +40,7 @@ class Main:
         self.cur_lr = self.c.lr()
         self.cur_reg_l2 = self.c.reg_l2()
         self.cur_pre_trans = 0.
-        self.cur_right_gain = 0.
+        self.cur_left_deduct = 0.
         self.cur_neg_mul = 0.
         self.cur_gamma = 0.
         self.cur_lamda = 0.
@@ -53,7 +53,7 @@ class Main:
 
         # generator
         self.generator = GeneratorProcess(self.name, self.model, self.c)
-        self.set_game_param(self.c.pre_trans(), self.c.right_gain(), self.c.neg_mul(), self.c.gamma(), self.c.lamda())
+        self.set_game_param(self.c.pre_trans(), self.c.left_deduct(), self.c.neg_mul(), self.c.gamma(), self.c.lamda())
 
     def set_optim(self, lr, reg_l2):
         if lr == self.cur_lr and reg_l2 == self.cur_reg_l2: return
@@ -63,12 +63,12 @@ class Main:
         self.cur_lr = lr
         self.cur_reg_l2 = reg_l2
 
-    def set_game_param(self, pre_trans, gain, neg_mul, gamma, lamda):
-        if pre_trans == self.cur_pre_trans and gain == self.cur_right_gain and \
+    def set_game_param(self, pre_trans, left_deduct, neg_mul, gamma, lamda):
+        if pre_trans == self.cur_pre_trans and left_deduct == self.cur_left_deduct and \
                 neg_mul == self.cur_neg_mul and gamma == self.cur_gamma and lamda == self.cur_lamda: return
-        self.generator.SetParams(pre_trans, gain, neg_mul, gamma, lamda)
+        self.generator.SetParams(pre_trans, left_deduct, neg_mul, gamma, lamda)
         self.cur_pre_trans = pre_trans
-        self.cur_right_gain = gain
+        self.cur_left_deduct = left_deduct
         self.cur_neg_mul = neg_mul
         self.cur_gamma = gamma
         self.cur_lamda = lamda
@@ -193,7 +193,7 @@ class Main:
             tracker.save()
             if (update + 1) % 2 == 0:
                 self.set_optim(self.c.lr(), self.c.reg_l2())
-                self.set_game_param(self.c.pre_trans(), self.c.right_gain(), self.c.neg_mul(), self.c.gamma(), self.c.lamda())
+                self.set_game_param(self.c.pre_trans(), self.c.left_deduct(), self.c.neg_mul(), self.c.gamma(), self.c.lamda())
                 self.set_weight_param(self.c.entropy_weight())
             if (update + 1) % 25 == 0: logger.log()
             if (update + 1) % 500 == 0: experiment.save_checkpoint()

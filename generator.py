@@ -6,7 +6,7 @@ from model import Model, obs_to_torch
 from game import kTensorDim, Worker
 
 class DataGenerator:
-    def __init__(self, name, model, n_workers, env_per_worker, worker_steps, pre_trans, right_gain, neg_mul, gamma, lamda):
+    def __init__(self, name, model, n_workers, env_per_worker, worker_steps, pre_trans, left_deduct, neg_mul, gamma, lamda):
         self.model = model
         self.n_workers = n_workers
         self.env_per_worker = env_per_worker
@@ -36,7 +36,7 @@ class DataGenerator:
         for i in self.workers: i.child.send(('reset', None))
         for i in self.workers: i.child.recv()
 
-        self.set_params(pre_trans, right_gain, neg_mul, gamma, lamda)
+        self.set_params(pre_trans, left_deduct, neg_mul, gamma, lamda)
         self.obs = obs_to_torch(self.obs_np, self.device)
 
     def w_range(self, x): return slice(x * self.env_per_worker, (x + 1) * self.env_per_worker)
@@ -48,9 +48,9 @@ class DataGenerator:
                 state_dict[i] = state_dict[i].to(target_device)
         self.model.load_state_dict(state_dict)
 
-    def set_params(self, pre_trans, right_gain, neg_mul, gamma, lamda):
+    def set_params(self, pre_trans, left_deduct, neg_mul, gamma, lamda):
         for i in self.workers:
-            i.child.send(('set_param', (pre_trans, right_gain, neg_mul)))
+            i.child.send(('set_param', (pre_trans, left_deduct, neg_mul)))
         self.gamma = gamma
         self.lamda = lamda
 
@@ -205,7 +205,7 @@ class GeneratorProcess:
         ctx = torch.multiprocessing.get_context('spawn')
         self.process = ctx.Process(target = generator_process,
                 args = (parent, name, c.channels, c.blocks, c.n_workers, c.env_per_worker,
-                    c.worker_steps, c.pre_trans(), c.right_gain(), c.neg_mul(), c.gamma(), c.lamda()))
+                    c.worker_steps, c.pre_trans(), c.left_deduct(), c.neg_mul(), c.gamma(), c.lamda()))
         self.process.start()
         self.SendModel(model)
 
@@ -218,8 +218,8 @@ class GeneratorProcess:
     def StartGenerate(self, step):
         self.child.send(('start_generate', step))
 
-    def SetParams(self, pre_trans, right_gain, neg_mul, gamma, lamda):
-        self.child.send(('set_param', (pre_trans, right_gain, neg_mul, gamma, lamda)))
+    def SetParams(self, pre_trans, left_deduct, neg_mul, gamma, lamda):
+        self.child.send(('set_param', (pre_trans, left_deduct, neg_mul, gamma, lamda)))
 
     def GetData(self):
         self.child.send(('get_data', None))

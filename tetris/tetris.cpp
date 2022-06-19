@@ -143,7 +143,6 @@ class Tetris {
 
   // Reward model
   static constexpr double kRewardMultiplier_ = 1e-5; // 10 per maxout
-  static constexpr double kStepReward_ = 5e-4; // 100 points/piece
   // A very small reward given to every half-rounds. Used to guide the very
   //   early stage of training.
   static constexpr double kInvalidReward_ = -0.3;
@@ -158,13 +157,13 @@ class Tetris {
   static constexpr double kBottomGain_ = 0.1;
   // Provide a reward gain for bottom row scoring to guide the agent to not
   //   score dirty tetrises.
-  double right_gain_ = 0.2;
-  // Provide a reward gain to guide the agent to use right well strategy.
+  double left_deduct_ = 0.2;
+  // Provide a reward difference to guide the agent to use right well strategy.
   // This can be decreased during training.
   double penalty_multiplier_ = 1.0;
   // Multiplier of misdrop & infeasible penalty. Set to 0 in early training to
   //   avoid misguiding the agent.
-  double game_over_penalty_ = 0.0;
+  double step_reward_ = 5e-4;
 
 
   void SpawnPiece_() {
@@ -582,7 +581,7 @@ class Tetris {
   }
 
   void CheckLineLimit_() {
-    if (lines_ >= 230) game_over_ = true;
+    if (lines_ >= 330) game_over_ = true;
   }
 
   // needed: StoreMap_(true) (stored_mp_, stored_mp_lb_), temp_lines_
@@ -611,7 +610,7 @@ class Tetris {
         return kInvalidReward_;
       }
       prev_planned_placement_ = planned_placement_;
-      double reward = SetPlannedPlacement_(pos) + kStepReward_;
+      double reward = SetPlannedPlacement_(pos) + step_reward_;
       place_stage_ = false;
       consecutive_invalid_ = 0;
       return reward;
@@ -693,9 +692,9 @@ class Tetris {
                                    real_lines > 0);
     pieces_++;
     double score_reward = kRewardMultiplier_ * score_delta;
-    if (pos.y == 9 && level < 29) score_reward *= 1 + right_gain_;
+    if (pos.y == 0 && real_lines > 2) score_reward *= 1 - left_deduct_;
     if (pos.x >= 18) score_reward *= 1 + kBottomGain_;
-    reward += score_reward + kStepReward_;
+    reward += score_reward + step_reward_;
     real_placement_set_ = false;
     place_stage_ = true;
     consecutive_invalid_ = 0;
@@ -739,7 +738,7 @@ class Tetris {
 
   void ResetGame(int start_level = 18, double hz_avg = 12, double hz_dev = 0,
                  int microadj_delay = 40, int start_lines = 0, bool drought_mode = false,
-                 double game_over_penalty = 0, double right_gain = 0.2,
+                 double step_points = 0, double left_deduct = 0.2,
                  double penalty_multiplier = 1.0) {
     start_level_ = start_level;
     lines_ = start_lines;
@@ -753,8 +752,8 @@ class Tetris {
     consecutive_invalid_ = 0;
     for (auto& i : field_) std::fill(i.begin(), i.end(), false);
     drought_mode_ = drought_mode;
-    game_over_penalty_ = game_over_penalty;
-    right_gain_ = right_gain;
+    step_reward_ = step_points * kRewardMultiplier_ * 0.5;
+    left_deduct_ = left_deduct;
     penalty_multiplier_ = penalty_multiplier;
     hz_avg_ = hz_avg;
     hz_dev_ = hz_dev;
@@ -770,24 +769,24 @@ class Tetris {
     StoreMap_(false);
   }
 
-  void ResetRandom(float pre_trans, double right_gain, double penalty_multiplier) {
+  void ResetRandom(float pre_trans, double left_deduct, double penalty_multiplier) {
     using IntRand = std::uniform_int_distribution<int>;
     using RealRand = std::uniform_real_distribution<float>;
     constexpr double hz_table[] = {12, 13.5, 15, 20, 30};
     constexpr double start_level_table[] = {18, 19, 29};
     constexpr int adj_delay_table[] = {8, 16, 21, 25, 61};
-    constexpr double penalty_table[] = {-1.0, -10.0};
+    constexpr double step_points_table[] = {100, 600, 3000};
     int hz_ind = IntRand(0, 4)(rng_);
     int start_level = start_level_table[IntRand(0, 2)(rng_)];
     double hz_avg = hz_table[hz_ind];
     double hz_dev = 0; // IntRand(0, 2)(rng_) ? 0 : 1;
     int microadj_delay = adj_delay_table[IntRand(0, 4)(rng_)];
-    double game_over_penalty = -2.0; //penalty_table[IntRand(0, 1)(rng_)];
+    double step_points = step_points_table[IntRand(0, 2)(rng_)];
     int start_lines = 0;
     bool drought_mode = IntRand(0, 2)(rng_) == 0;
     if (IntRand(0, 1)(rng_)) {
       hz_avg = IntRand(0, 1)(rng_) ? 12 : 20;
-      microadj_delay = IntRand(0, 1)(rng_) ? 21 : 25;
+      microadj_delay = 21;
     }
     if (RealRand(0, 1)(rng_) < pre_trans) {
       // pre-transition training
@@ -809,7 +808,7 @@ class Tetris {
       }
     }*/
     ResetGame(start_level, hz_avg, hz_dev, microadj_delay, start_lines,
-              drought_mode, game_over_penalty, right_gain, penalty_multiplier);
+              drought_mode, step_points, left_deduct, penalty_multiplier);
   }
 
   static int PlaceField(Field& field, int piece, const Position& pos) {
@@ -939,13 +938,13 @@ class Tetris {
     } else {
       misc[50] = 1; // 8
     }
-    // 51-53: game_over_penalty
-    if (game_over_penalty_ >= -0.3) {
-      misc[51] = 1; // 0
-    } else if (game_over_penalty_ >= -3) {
-      misc[52] = 1; // 1
+    // 51-53: step_reward_
+    if (step_reward_ >= 1000 * kRewardMultiplier_ * 0.5) {
+      misc[51] = 1; // 3000
+    } else if (step_reward_ >= 300 * kRewardMultiplier_ * 0.5) {
+      misc[52] = 1; // 600
     } else {
-      misc[53] = 1; // 5
+      misc[53] = 1; // 100
     }
     // 54: prev_misdrop
     misc[54] = !place_stage_ && prev_misdrop_;
@@ -979,7 +978,6 @@ class Tetris {
     }
     double ret = InputPlacement_(pos);
     if (training && orig_stage && !place_stage_) TrainingSetPlacement();
-    if (game_over_) ret += game_over_penalty_;
     return ret;
   }
 
@@ -1151,7 +1149,7 @@ public:
     printf("Consecutive invalid: %d\n", consecutive_invalid_);
     puts("Parameters:");
     printf("Hz: avg %f dev %f, micro delay: %d\n", hz_avg_, hz_dev_, microadj_delay_);
-    printf("Penal: %f, drought: %d\n", game_over_penalty_, (int)drought_mode_);
+    printf("Step: %f, drought: %d\n", step_reward_, (int)drought_mode_);
     puts("");
     fflush(stdout);
   }
@@ -1270,13 +1268,13 @@ static int TetrisInit(Tetris* self, PyObject* args, PyObject* kwds) {
 }
 
 static PyObject* Tetris_ResetRandom(Tetris* self, PyObject* args, PyObject* kwds) {
-  static const char* kwlist[] = {"pre_trans", "right_gain", "penalty_multiplier", nullptr};
-  double pre_trans = 1.0, right_gain = 0.2, penalty_multiplier = 0.0;
+  static const char* kwlist[] = {"pre_trans", "left_deduct", "penalty_multiplier", nullptr};
+  double pre_trans = 1.0, left_deduct = 0.2, penalty_multiplier = 0.0;
   if (!PyArg_ParseTupleAndKeywords(args, kwds, "ddd", (char**)kwlist,
-                                   &pre_trans, &right_gain, &penalty_multiplier)) {
+                                   &pre_trans, &left_deduct, &penalty_multiplier)) {
     return nullptr;
   }
-  self->ResetRandom(pre_trans, right_gain, penalty_multiplier);
+  self->ResetRandom(pre_trans, left_deduct, penalty_multiplier);
   Py_RETURN_NONE;
 }
 
@@ -1441,7 +1439,7 @@ static PyObject* Tetris_StateShape(void*, PyObject* Py_UNUSED(ignored)) {
 static PyObject* Tetris_ResetGame(Tetris* self, PyObject* args, PyObject* kwds) {
   static const char* kwlist[] = {
       "start_level", "hz_avg", "hz_dev", "microadj_delay", "start_lines",
-      "drought_mode", "game_over_penalty", "right_gain", "penalty_multiplier",
+      "drought_mode", "game_over_penalty", "left_deduct", "penalty_multiplier",
       nullptr
   };
   int start_level = 18;
@@ -1451,15 +1449,15 @@ static PyObject* Tetris_ResetGame(Tetris* self, PyObject* args, PyObject* kwds) 
   int start_lines = 0;
   int drought_mode = 0;
   double game_over_penalty = 0;
-  double right_gain = 0.2;
+  double left_deduct = 0.2;
   double penalty_multiplier = 1.0;
   if (!PyArg_ParseTupleAndKeywords(args, kwds, "|iddiipddd", (char**)kwlist,
         &start_level, &hz_avg, &hz_dev, &microadj_delay, &start_lines,
-        &drought_mode, &game_over_penalty, &right_gain, &penalty_multiplier)) {
+        &drought_mode, &game_over_penalty, &left_deduct, &penalty_multiplier)) {
     return nullptr;
   }
   self->ResetGame(start_level, hz_avg, hz_dev, microadj_delay, start_lines,
-      drought_mode, game_over_penalty, right_gain, penalty_multiplier);
+      drought_mode, game_over_penalty, left_deduct, penalty_multiplier);
   Py_RETURN_NONE;
 }
 
