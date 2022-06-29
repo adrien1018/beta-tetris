@@ -39,11 +39,7 @@ class Main:
         # dynamic hyperparams
         self.cur_lr = self.c.lr()
         self.cur_reg_l2 = self.c.reg_l2()
-        self.cur_pre_trans = 0.
-        self.cur_left_deduct = 0.
-        self.cur_neg_mul = 0.
-        self.cur_gamma = 0.
-        self.cur_lamda = 0.
+        self.cur_game_params = (0., 0., 0., 0., 0., 0., 0.)
         self.cur_entropy_weight = self.c.entropy_weight()
 
         # optimizer
@@ -52,8 +48,13 @@ class Main:
                 weight_decay = self.cur_reg_l2)
 
         # generator
-        self.generator = GeneratorProcess(self.name, self.model, self.c)
-        self.set_game_param(self.c.pre_trans(), self.c.left_deduct(), self.c.neg_mul(), self.c.gamma(), self.c.lamda())
+        cur_params = self.get_game_params()
+        self.generator = GeneratorProcess(self.name, self.model, self.c, cur_params)
+        self.set_game_params(cur_params)
+
+    def get_game_params(self):
+        return (self.c.pre_trans(), self.c.left_deduct(), self.c.neg_mul(), self.c.reward_ratio(),
+                self.c.normal_rate(), self.c.gamma(), self.c.lamda())
 
     def set_optim(self, lr, reg_l2):
         if lr == self.cur_lr and reg_l2 == self.cur_reg_l2: return
@@ -63,15 +64,10 @@ class Main:
         self.cur_lr = lr
         self.cur_reg_l2 = reg_l2
 
-    def set_game_param(self, pre_trans, left_deduct, neg_mul, gamma, lamda):
-        if pre_trans == self.cur_pre_trans and left_deduct == self.cur_left_deduct and \
-                neg_mul == self.cur_neg_mul and gamma == self.cur_gamma and lamda == self.cur_lamda: return
-        self.generator.SetParams(pre_trans, left_deduct, neg_mul, gamma, lamda)
-        self.cur_pre_trans = pre_trans
-        self.cur_left_deduct = left_deduct
-        self.cur_neg_mul = neg_mul
-        self.cur_gamma = gamma
-        self.cur_lamda = lamda
+    def set_game_params(self, game_params):
+        if game_params == self.cur_game_params: return
+        self.generator.SetParams(game_params)
+        self.cur_game_params = game_params
 
     def set_weight_param(self, entropy):
         self.cur_entropy_weight = entropy
@@ -193,7 +189,7 @@ class Main:
             tracker.save()
             if (update + 1) % 2 == 0:
                 self.set_optim(self.c.lr(), self.c.reg_l2())
-                self.set_game_param(self.c.pre_trans(), self.c.left_deduct(), self.c.neg_mul(), self.c.gamma(), self.c.lamda())
+                self.set_game_params(self.get_game_params())
                 self.set_weight_param(self.c.entropy_weight())
             if (update + 1) % 25 == 0: logger.log()
             if (update + 1) % 500 == 0: experiment.save_checkpoint()

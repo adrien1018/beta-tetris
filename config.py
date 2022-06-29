@@ -25,12 +25,14 @@ class Configs(BaseConfigs):
     lr: float = FloatDynamicHyperParam(1e-4, range_ = (0, 1e-3))
     clipping_range: float = 0.2
     vf_weight: float = 0.5
-    entropy_weight: float = FloatDynamicHyperParam(2.2e-2, range_ = (0, 5e-2))
+    entropy_weight: float = FloatDynamicHyperParam(1.6e-2, range_ = (0, 5e-2))
     reg_l2: float = FloatDynamicHyperParam(0., range_ = (0, 5e-5))
 
     pre_trans: float = FloatDynamicHyperParam(0.8, range_ = (0, 1))
-    left_deduct: float = FloatDynamicHyperParam(0.4, range_ = (0, 1))
-    neg_mul: float = FloatDynamicHyperParam(1., range_ = (0, 1))
+    left_deduct: float = FloatDynamicHyperParam(0.0, range_ = (0, 1))
+    neg_mul: float = FloatDynamicHyperParam(0.0, range_ = (0, 1))
+    reward_ratio: float = FloatDynamicHyperParam(0.2, range_ = (0, 1))
+    normal_rate: float = FloatDynamicHyperParam(0.1, range_ = (0, 1))
 
 def LoadConfig(with_experiment = True):
     parser = argparse.ArgumentParser()

@@ -6,14 +6,13 @@ from model import Model, obs_to_torch
 from game import kTensorDim, Worker
 
 class DataGenerator:
-    def __init__(self, name, model, n_workers, env_per_worker, worker_steps, pre_trans, left_deduct, neg_mul, gamma, lamda):
+    def __init__(self, name, model, n_workers, env_per_worker, worker_steps, game_params):
         self.model = model
         self.n_workers = n_workers
         self.env_per_worker = env_per_worker
         self.envs = n_workers * env_per_worker
         self.worker_steps = worker_steps
-        self.gamma = gamma
-        self.lamda = lamda
+        self.gamma, self.lamda = game_params[-2:]
         self.device = next(self.model.parameters()).device
         self.total_games = 0
 
@@ -36,7 +35,7 @@ class DataGenerator:
         for i in self.workers: i.child.send(('reset', None))
         for i in self.workers: i.child.recv()
 
-        self.set_params(pre_trans, left_deduct, neg_mul, gamma, lamda)
+        self.set_params(game_params)
         self.obs = obs_to_torch(self.obs_np, self.device)
 
     def w_range(self, x): return slice(x * self.env_per_worker, (x + 1) * self.env_per_worker)
@@ -48,11 +47,10 @@ class DataGenerator:
                 state_dict[i] = state_dict[i].to(target_device)
         self.model.load_state_dict(state_dict)
 
-    def set_params(self, pre_trans, left_deduct, neg_mul, gamma, lamda):
+    def set_params(self, game_params):
         for i in self.workers:
-            i.child.send(('set_param', (pre_trans, left_deduct, neg_mul)))
-        self.gamma = gamma
-        self.lamda = lamda
+            i.child.send(('set_param', game_params[:-2]))
+        self.gamma, self.lamda = game_params[-2:]
 
     def sample(self, train = True, gpu = False, step = 0):
         """### Sample data with current policy"""
@@ -183,7 +181,7 @@ def generator_process(remote, name, channels, blocks, *args):
             if cmd == "update_model":
                 generator.update_model(data)
             elif cmd == "set_param":
-                generator.set_params(*data)
+                generator.set_params(data)
             elif cmd == "start_generate":
                 samples = generator.sample(step = data)
             elif cmd == "get_data":
@@ -200,12 +198,11 @@ def generator_process(remote, name, channels, blocks, *args):
         remote.close()
 
 class GeneratorProcess:
-    def __init__(self, name, model, c):
+    def __init__(self, name, model, c, game_params):
         self.child, parent = Pipe()
         ctx = torch.multiprocessing.get_context('spawn')
         self.process = ctx.Process(target = generator_process,
-                args = (parent, name, c.channels, c.blocks, c.n_workers, c.env_per_worker,
-                    c.worker_steps, c.pre_trans(), c.left_deduct(), c.neg_mul(), c.gamma(), c.lamda()))
+                args = (parent, name, c.channels, c.blocks, c.n_workers, c.env_per_worker, c.worker_steps, game_params))
         self.process.start()
         self.SendModel(model)
 
@@ -218,8 +215,8 @@ class GeneratorProcess:
     def StartGenerate(self, step):
         self.child.send(('start_generate', step))
 
-    def SetParams(self, pre_trans, left_deduct, neg_mul, gamma, lamda):
-        self.child.send(('set_param', (pre_trans, left_deduct, neg_mul, gamma, lamda)))
+    def SetParams(self, game_params):
+        self.child.send(('set_param', game_params))
 
     def GetData(self):
         self.child.send(('get_data', None))
