@@ -791,13 +791,13 @@ class Tetris {
     constexpr double hz_table[] = {12, 13.5, 15, 20, 30};
     constexpr double start_level_table[] = {18, 19, 29};
     constexpr int adj_delay_table[] = {8, 16, 21, 25, 61};
-    constexpr double step_points_table[] = {100, 400, 2000};
+    constexpr double step_points_table[] = {60, 360, 2000};
     int hz_ind = IntRand(0, 4)(rng_);
     int start_level = start_level_table[IntRand(0, 2)(rng_)];
     double hz_avg = hz_table[hz_ind];
     double hz_dev = 0; // IntRand(0, 2)(rng_) ? 0 : 1;
     int microadj_delay = adj_delay_table[IntRand(0, 4)(rng_)];
-    double step_points = step_points_table[std::discrete_distribution<int>({1, reward_ratio, reward_ratio * reward_ratio})(rng_)];
+    double step_points = step_points_table[std::discrete_distribution<int>({1, reward_ratio, std::pow(reward_ratio, 1.5)})(rng_)];
     int start_lines = 0;
     bool drought_mode = IntRand(0, 2)(rng_) == 0;
     if (IntRand(0, 1)(rng_)) {
@@ -957,10 +957,10 @@ class Tetris {
     // 51-53: step_reward_
     if (step_reward_ >= 1000 * kRewardMultiplier_ * 0.5) {
       misc[51] = 1; // 2000
-    } else if (step_reward_ >= 300 * kRewardMultiplier_ * 0.5) {
-      misc[52] = 1; // 400
+    } else if (step_reward_ >= 200 * kRewardMultiplier_ * 0.5) {
+      misc[52] = 1; // 360
     } else {
-      misc[53] = 1; // 100
+      misc[53] = 1; // 60
     }
     // 54: prev_misdrop
     misc[54] = !place_stage_ && prev_misdrop_;

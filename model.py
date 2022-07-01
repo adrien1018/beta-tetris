@@ -8,7 +8,8 @@ from game import kH, kW
 
 # refer to Tetris::GetState for details
 kOrd = 13
-kInChannel = kOrd + 55
+kBoardChannel = 1 + 15
+kOtherChannel = (kOrd - 1) + (55 - 15)
 
 class ConvBlock(nn.Module):
     def __init__(self, ch):
@@ -28,11 +29,13 @@ class Model(nn.Module):
     def __init__(self, ch, blk):
         super().__init__()
         self.start = nn.Sequential(
-                nn.Conv2d(kInChannel, ch, 5, padding = 2),
+                nn.Conv2d(kBoardChannel, ch, 5, padding = 2),
                 nn.BatchNorm2d(ch),
                 nn.ReLU(True),
                 )
-        self.res = nn.Sequential(*[ConvBlock(ch) for i in range(blk)])
+        self.res1 = nn.Sequential(*[ConvBlock(ch) for i in range(blk-blk//2)])
+        self.mid = nn.Conv2d(ch + kOtherChannel, ch, 3, padding = 1)
+        self.res2 = nn.Sequential(*[ConvBlock(ch) for i in range(blk//2)])
         self.pi_logits_head = nn.Sequential(
                 nn.Conv2d(ch, 8, 1),
                 nn.BatchNorm2d(8),
@@ -52,13 +55,20 @@ class Model(nn.Module):
 
     @autocast()
     def forward(self, obs: torch.Tensor, return_categorical: bool = True):
-        q = torch.zeros((obs.shape[0], kInChannel, kH, kW), dtype = torch.float32, device = obs.device)
-        q[:,:kOrd] = obs[:,:kOrd]
-        misc = obs[:,kOrd].view(obs.shape[0], -1)[:,:kInChannel-kOrd]
-        q[:,kOrd:] = misc.view(obs.shape[0], -1, 1, 1)
-        x = self.start(q)
-        x = self.res(x)
-        valid = obs[:,9:13].view(obs.shape[0], -1)
+        batch = obs.shape[0]
+        q1 = torch.zeros((batch, kBoardChannel, kH, kW), dtype = torch.float32, device = obs.device)
+        q2 = torch.zeros((batch, kOtherChannel, kH, kW), dtype = torch.float32, device = obs.device)
+        misc1 = obs[:,kOrd].view(batch, -1)[:,:15]
+        misc2 = obs[:,kOrd].view(batch, -1)[:,15:55]
+        q1[:,:1] = obs[:,:1]
+        q1[:,1:] = misc1.view(batch, -1, 1, 1)
+        q2[:,:kOrd-1] = obs[:,1:kOrd]
+        q2[:,kOrd-1:] = misc2.view(batch, -1, 1, 1)
+        x = self.start(q1)
+        x = self.res1(x)
+        x = self.mid(torch.cat([x, q2], 1))
+        x = self.res2(x)
+        valid = obs[:,9:13].view(batch, -1)
         pi = self.pi_logits_head(x)
         value = self.value(x)
         with autocast(enabled = False):
