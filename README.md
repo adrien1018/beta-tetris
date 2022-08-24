@@ -39,17 +39,17 @@ Available parameters are listed below:
 
 The model is trained mainly for 12 & 20 Hz / 250ms reaction time. The optimal parameters & statistics of this agent for the 4 formats in AI Exhibition is as follows:
 
-| Format |  Drought mode  |  Killscreen  |  Human possible  |  No limits  |
-| --- |  ---  |  ---  |  ---  |  ---  |
-| Optimal `step-points` | 360 | 100 | 360 | 2000 |
-| Average |  651,144  |  1,157,282  |  1,135,835  |  2,027,194  |
-| Std. deviation |  85,832  |  264,685  |  137,824  |  211,327  |
-| 1st percentile |  330,480  |  90,000  |  481,080  |  837,800  |
-| 5th percentile |  518,040  |  462,000  |  977,440  |  1,819,640  |
-| 10th percentile |  552,620  |  948,740  |  1,023,740  |  1,890,300  |
-| 30th percentile |  618,620  |  1,147,900  |  1,107,900  |  1,997,460  |
-| 50th percentile |  658,200  |  1,218,820  |  1,150,440  |  2,051,940  |
-| 70th percentile |  694,180  |  1,283,120  |  1,192,620  |  2,111,020  |
-| 90th percentile |  743,980  |  1,368,700  |  1,258,400  |  2,192,480  |
-| 95th percentile |  773,280  |  1,398,020  |  1,293,500  |  2,220,560  |
-| 99th percentile |  816,940  |  1,458,440  |  1,352,620  |  2,271,640  |
+| Format |  Drought mode  |  Killscreen  |  Human possible  |  No limits  |  12 Hz Killscreen  |
+| --- |  ---  |  ---  |  ---  |  ---  |  ---  |
+| Optimal `step-points` | 360 | 100 | 360 | 2000 | 360 |
+| Average         | 651,144 | 1,157,282 | 1,135,835 | 2,027,194 |  48,372 |
+| Std. deviation  |  85,832 |   264,685 |   137,824 |   211,327 |  37,756 |
+| 1st percentile  | 330,480 |    90,000 |   481,080 |   837,800 |   3,600 |
+| 5th percentile  | 518,040 |   462,000 |   977,440 | 1,819,640 |   9,000 |
+| 10th percentile | 552,620 |   948,740 | 1,023,740 | 1,890,300 |  12,600 |
+| 30th percentile | 618,620 | 1,147,900 | 1,107,900 | 1,997,460 |  24,000 |
+| 50th percentile | 658,200 | 1,218,820 | 1,150,440 | 2,051,940 |  38,400 |
+| 70th percentile | 694,180 | 1,283,120 | 1,192,620 | 2,111,020 |  57,000 |
+| 90th percentile | 743,980 | 1,368,700 | 1,258,400 | 2,192,480 |  96,600 |
+| 95th percentile | 773,280 | 1,398,020 | 1,293,500 | 2,220,560 | 125,400 |
+| 99th percentile | 816,940 | 1,458,440 | 1,352,620 | 2,271,640 | 186,600 |
