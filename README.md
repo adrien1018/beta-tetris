@@ -53,3 +53,5 @@ The model is trained mainly for 12 & 20 Hz / 250ms reaction time. The optimal pa
 | 90th percentile | 743,980 | 1,368,700 | 1,258,400 | 2,192,480 |  96,600 |
 | 95th percentile | 773,280 | 1,398,020 | 1,293,500 | 2,220,560 | 125,400 |
 | 99th percentile | 816,940 | 1,458,440 | 1,352,620 | 2,271,640 | 186,600 |
+
+Note that this statistics is collected using the same RNG used in training. The average score will be slightly higher on the real NES RNG.
