@@ -17,13 +17,13 @@ hz_dev = 0
 microadj_delay = 21
 start_level = 18
 drought_mode = False
-penalty = 0.0
+step_points = 100.
 first_gain = 0.0
 
 def ResetGame(game):
     game.ResetGame(hz_avg = hz_avg, hz_dev = hz_dev, drought_mode = drought_mode,
                    microadj_delay = microadj_delay, start_level = start_level,
-                   game_over_penalty = penalty)
+                   step_points = step_points)
 
 def GetSeed(i):
     return (i * 42973851 + 35)
@@ -60,7 +60,7 @@ def Main(model_path):
     elif drought_mode: search_limit = 222
     elif microadj_delay >= 20: search_limit = 222
 
-    n = 500
+    n = 100
     results = []
     for i in range(n):
         # if i % 5 == 0: print(i, file=sys.stderr)
@@ -98,7 +98,7 @@ if __name__ == "__main__":
     parser.add_argument('--hz-dev', type = float)
     parser.add_argument('--microadj-delay', type = int)
     parser.add_argument('--start-level', type = int)
-    parser.add_argument('--game-over-penalty', type = float)
+    parser.add_argument('--step-points', type = float)
     parser.add_argument('--drought-mode', action = 'store_true')
     parser.add_argument('--first-gain', type = float)
     args = parser.parse_args()
@@ -107,7 +107,7 @@ if __name__ == "__main__":
     if args.hz_dev is not None: hz_dev = args.hz_dev
     if args.microadj_delay is not None: microadj_delay = args.microadj_delay
     if args.start_level is not None: start_level = args.start_level
-    if args.game_over_penalty is not None: penalty = args.game_over_penalty
+    if args.step_points is not None: step_points = args.step_points
     if args.first_gain is not None: first_gain = args.first_gain
     drought_mode = args.drought_mode
     Main(args.model)

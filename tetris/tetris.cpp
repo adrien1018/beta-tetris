@@ -594,6 +594,7 @@ class Tetris {
   }
 
   void CheckLineLimit_() {
+    if ((drought_mode_ || start_level_ == 29) && lines_ >= 230) game_over_ = true;
     if (lines_ >= 330) game_over_ = true;
   }
 

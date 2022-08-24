@@ -17,9 +17,9 @@ hz_dev = 0
 microadj_delay = 21
 start_level = 18
 drought_mode = False
-penalty = 0.0
+step_points = 0.0
 search_enable = False
-first_gain = 0.0
+first_gain = 100.
 
 def GetTorch(game):
     return obs_to_torch(game.GetState(), device).unsqueeze(0)
@@ -113,16 +113,16 @@ class GameConn(socketserver.BaseRequestHandler):
                 data = self.read_until(1)
                 if data[0] == 0xff:
                     cur, nxt, _ = self.read_until(3)
-                    # adjustable: hz_dev, hz_dev, microadj_delay, drought_mode, start_level, game_over_penalty
+                    # adjustable: hz_dev, hz_dev, microadj_delay, drought_mode, start_level, step_points
                     st = {'hz_avg': hz_avg, 'hz_dev': hz_dev, 'microadj_delay': microadj_delay,
                           'drought_mode': drought_mode, 'start_level': start_level,
-                          'game_over_penalty': penalty}
+                          'step_points': step_points}
                     game.ResetGame(**st)
                     print()
                     print()
                     print('Current game:')
                     print('Start level: {}, drought mode: {}'.format(start_level, st['drought_mode']))
-                    print('Game over penalty:', st['game_over_penalty'])
+                    print('Step points:', st['step_points'])
                     print('Tapping speed:', 'NormalDistribution({}, {})'.format(st['hz_avg'], st['hz_dev']) if st['hz_dev'] > 0 else 'constant {}'.format(st['hz_avg']), 'Hz')
                     print('Microadjustment delay:', st['microadj_delay'], 'frames', flush = True)
                     game.SetNowPiece(cur)
@@ -146,7 +146,7 @@ if __name__ == "__main__":
     parser.add_argument('--hz-dev', type = float)
     parser.add_argument('--microadj-delay', type = int)
     parser.add_argument('--start-level', type = int)
-    parser.add_argument('--game-over-penalty', type = float)
+    parser.add_argument('--step-points', type = float)
     parser.add_argument('--drought-mode', action = 'store_true')
     parser.add_argument('--first-gain', type = float)
     args = parser.parse_args()
@@ -155,12 +155,12 @@ if __name__ == "__main__":
     if args.hz_dev is not None: hz_dev = args.hz_dev
     if args.microadj_delay is not None: microadj_delay = args.microadj_delay
     if args.start_level is not None: start_level = args.start_level
-    if args.game_over_penalty is not None: penalty = args.game_over_penalty
+    if args.step_points is not None: step_points = args.step_points
     if args.first_gain is not None:
         first_gain = args.first_gain
         search_enable = first_gain >= 0
     drought_mode = args.drought_mode
-    
+
     with torch.no_grad():
         c = Configs()
         model = Model(c.channels, c.blocks).to(device)
