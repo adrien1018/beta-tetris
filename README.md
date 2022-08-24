@@ -2,7 +2,7 @@
 
 An actor-critic neural network agent playing NES Tetris with tapping speed and reaction time limitations.
 
-This is the same agent featured in [Classic Tetris AI Exhibition](https://www.twitch.tv/videos/1073802901).
+This is the left well & improved version of the agent featured in [Classic Tetris AI Exhibition](https://www.twitch.tv/videos/1073802901).
 
 ## Setup
 
@@ -20,7 +20,7 @@ pip install -r requirements.txt
 
 Run the Python server first:
 ```
-python3 fceux.py model/model.pth --hz-avg=12 --start-level=18 --microadj-delay=21 --game-over-penalty=-1 --first-gain=0.03 [--drought-mode]
+python3 fceux.py model/model.pth --hz-avg=12 --start-level=18 --microadj-delay=21 --step-points=360 [--drought-mode]
 ```
 and wait until it outputs `Ready`.
 
@@ -33,32 +33,23 @@ Available parameters are listed below:
 | `start-level` | 18,19,29 | |
 | `microadj-delay` | 8,16,21,25,61 | frames |
 | `drought-mode` | (specify or not) | Game genie code: `TAOPOPYA` `APOPXPEY` |
-| `game-over-penalty` | 0,-0.1,-1 | Adjust aggression |
-| `first-gain` | -1 or >=0 | Additional value given to the actor output when doing 1-ply move search. Resonable value range is 0.02 to 0.1. -1 to disable move search. |
+| `step-points` | 100,360,2000 | Adjust aggression |
 
 ## Parameters & Statistics
 
-The model is trained mainly on the 4 formats in AI Exhibition, so the performance in other settings will be slightly worse. Optimal parameters for the 4 formats:
-
-| Format | `game-over-penalty` | `first-gain` |
-| ----- | ----------- | ------- |
-| Drought mode | -0.1 or -1 | 0.06 |
-| Killscreen | -1 | -1 |
-| Human possible | -1 | 0.03 |
-| No limits | 0 | 0.03 |
-
-The statistics of the 4 formats under the above parameters:
+The model is trained mainly for 12 & 20 Hz / 250ms reaction time. The optimal parameters & statistics of this agent for the 4 formats in AI Exhibition is as follows:
 
 | Format |  Drought mode  |  Killscreen  |  Human possible  |  No limits  |
 | --- |  ---  |  ---  |  ---  |  ---  |
-| Average |  618,774  |  952,940  |  1,083,338  |  2,030,553  |
-| Std. deviation |  132,927  |  449,421  |  148,174  |  220,232  |
-| 1st percentile |  107,920  |  7,200  |  249,280  |  1,100,880  |
-| 5th percentile |  369,060  |  108,000  |  801,500  |  1,644,640  |
-| 10th percentile |  437,300  |  203,400  |  958,960  |  1,863,440  |
-| 30th percentile |  592,300  |  718,800  |  1,058,840  |  1,994,200  |
-| 50th percentile |  641,600  |  1,145,180  |  1,107,300  |  2,075,280  |
-| 70th percentile |  693,180  |  1,279,280  |  1,153,200  |  2,135,520  |
-| 90th percentile |  746,780  |  1,406,560  |  1,211,900  |  2,219,780  |
-| 95th percentile |  778,460  |  1,455,740  |  1,239,360  |  2,248,220  |
-| 99th percentile |  818,560  |  1,534,000  |  1,277,780  |  2,303,560  |
+| Optimal `step-points` | 360 | 100 | 360 | 2000 |
+| Average |  651,144  |  1,157,282  |  1,135,835  |  2,027,194  |
+| Std. deviation |  85,832  |  264,685  |  137,824  |  211,327  |
+| 1st percentile |  330,480  |  90,000  |  481,080  |  837,800  |
+| 5th percentile |  518,040  |  462,000  |  977,440  |  1,819,640  |
+| 10th percentile |  552,620  |  948,740  |  1,023,740  |  1,890,300  |
+| 30th percentile |  618,620  |  1,147,900  |  1,107,900  |  1,997,460  |
+| 50th percentile |  658,200  |  1,218,820  |  1,150,440  |  2,051,940  |
+| 70th percentile |  694,180  |  1,283,120  |  1,192,620  |  2,111,020  |
+| 90th percentile |  743,980  |  1,368,700  |  1,258,400  |  2,192,480  |
+| 95th percentile |  773,280  |  1,398,020  |  1,293,500  |  2,220,560  |
+| 99th percentile |  816,940  |  1,458,440  |  1,352,620  |  2,271,640  |
