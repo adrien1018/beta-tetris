@@ -595,7 +595,8 @@ class Tetris {
 
   void CheckLineLimit_() {
     if ((drought_mode_ || start_level_ == 29) && lines_ >= 230) game_over_ = true;
-    if (lines_ >= 330) game_over_ = true;
+    if (hz_avg_ >= 15 && lines_ >= 330) game_over_ = true;
+    if (lines_ >= 530) game_over_ = true;
   }
 
   // needed: StoreMap_(true) (stored_mp_, stored_mp_lb_), temp_lines_
@@ -905,11 +906,17 @@ class Tetris {
     // 18: level
     int lines = place_stage_ ? temp_lines_ : lines_;
     int level = GetLevel_(start_level_, lines);
+    int pieces = pieces_;
+    if (hz_avg_ < 15 && lines > 280) {
+      int reduce = (lines - 280) / 2 * 2;
+      pieces -= reduce * 10 / 4;
+      lines -= reduce;
+    }
     misc[18] = level * 1e-1;
     // 19: lines
     misc[19] = lines * 2e-2;
     // 20: pieces
-    misc[20] = pieces_ * 8e-3;
+    misc[20] = pieces * 8e-3;
     // 21-23: speed (29/19/18)
     misc[20 + (GetFramesPerDrop_(level) - 1)] = 1;
     // 24: drought
