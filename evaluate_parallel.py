@@ -19,7 +19,7 @@ hz_dev = 0
 microadj_delay = 21
 start_level = 18
 drought_mode = False
-penalty = 0.0
+penalty = -2.0
 
 def ResetGame(game):
     game.ResetGame(hz_avg = hz_avg, hz_dev = hz_dev, drought_mode = drought_mode,

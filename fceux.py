@@ -17,7 +17,7 @@ hz_dev = 0
 microadj_delay = 21
 start_level = 18
 drought_mode = False
-penalty = 0.0
+penalty = -2.0
 search_enable = False
 first_gain = 0.0
 
