@@ -37,7 +37,7 @@ Available parameters are listed below:
 
 ## Parameters & Statistics
 
-The model is trained mainly for 12 & 20 Hz / 250ms reaction time. The optimal parameters & statistics of this agent for the 4 formats in AI Exhibition is as follows:
+The model is trained mainly for 12 & 20 Hz / 350ms reaction time. The optimal parameters & statistics of this agent for the 4 formats in AI Exhibition is as follows:
 
 | Format |  Drought mode  |  Killscreen  |  Human possible  |  No limits  |  12 Hz Killscreen  |
 | --- |  ---  |  ---  |  ---  |  ---  |  ---  |
@@ -54,4 +54,4 @@ The model is trained mainly for 12 & 20 Hz / 250ms reaction time. The optimal pa
 | 95th percentile | 773,280 | 1,398,020 | 1,293,500 | 2,220,560 | 125,400 |
 | 99th percentile | 816,940 | 1,458,440 | 1,352,620 | 2,271,640 | 186,600 |
 
-Note that this statistics is collected using the same RNG used in training. The average score will be slightly higher on the real NES RNG.
+Note that this statistics is collected using the same RNG used in training. The average score will be slightly higher on the real NES RNG. For example, the average of Human Possible format on NES RNG is 1,149,681.
