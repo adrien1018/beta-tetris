@@ -25,7 +25,7 @@ class Configs(BaseConfigs):
     lr: float = FloatDynamicHyperParam(1e-4, range_ = (0, 1e-3))
     clipping_range: float = 0.2
     vf_weight: float = 0.5
-    raw_weight: float = 0.05
+    raw_weight: float = FloatDynamicHyperParam(3e-4, range_ = (0, 0.1))
     entropy_weight: float = FloatDynamicHyperParam(2.2e-2, range_ = (0, 5e-2))
     reg_l2: float = FloatDynamicHyperParam(0., range_ = (0, 5e-5))
 

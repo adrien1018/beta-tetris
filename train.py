@@ -41,6 +41,7 @@ class Main:
         self.cur_reg_l2 = self.c.reg_l2()
         self.cur_game_params = (0., 0., 0., 0., 0., 0., 0.)
         self.cur_entropy_weight = self.c.entropy_weight()
+        self.cur_raw_weight = self.c.raw_weight()
 
         # optimizer
         self.scaler = GradScaler()
@@ -69,8 +70,9 @@ class Main:
         self.generator.SetParams(game_params)
         self.cur_game_params = game_params
 
-    def set_weight_param(self, entropy):
+    def set_weight_param(self, entropy, raw):
         self.cur_entropy_weight = entropy
+        self.cur_raw_weight = raw
 
     def destroy(self):
         self.generator.Close()
@@ -161,7 +163,7 @@ class Main:
 
         # we want to maximize $\mathcal{L}^{CLIP+VF+EB}(\theta)$
         # so we take the negative of it as the loss
-        loss = -(policy_reward - self.c.vf_weight * vf_loss - self.c.raw_weight * raw_loss + \
+        loss = -(policy_reward - self.c.vf_weight * vf_loss - self.cur_raw_weight * raw_loss + \
                 self.cur_entropy_weight * entropy_bonus)
 
         # for monitoring
@@ -199,7 +201,7 @@ class Main:
             if (update + 1) % 2 == 0:
                 self.set_optim(self.c.lr(), self.c.reg_l2())
                 self.set_game_params(self.get_game_params())
-                self.set_weight_param(self.c.entropy_weight())
+                self.set_weight_param(self.c.entropy_weight(), self.c.raw_weight())
             if (update + 1) % 25 == 0: logger.log()
             if (update + 1) % 500 == 0: experiment.save_checkpoint()
 
