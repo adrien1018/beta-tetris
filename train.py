@@ -114,13 +114,14 @@ class Main:
     def _preprocess_samples(samples: Dict[str, torch.Tensor]):
         # $R_t$ returns sampled from $\pi_{\theta_{OLD}}$
         samples['returns'] = (samples['values'] + samples['advantages']).float()
-        samples['advantages'] = Main._normalize(samples['advantages'])
+        samples['advantages'] = Main._normalize(samples['advantages'][:,0])
 
     def _calc_loss(self, samples: Dict[str, torch.Tensor], clip_range: float) -> torch.Tensor:
         """## PPO Loss"""
         # Sampled observations are fed into the model to get $\pi_\theta(a_t|s_t)$ and $V^{\pi_\theta}(s_t)$;
         pi_val, value = self.model(samples['obs'], False)
         pi = Categorical(logits = pi_val)
+        value = value.transpose(0, 1)
 
         # #### Policy
         log_pi = pi.log_prob(samples['actions'])

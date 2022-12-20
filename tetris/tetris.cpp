@@ -618,22 +618,23 @@ class Tetris {
     return reward;
   }
 
-  double InputPlacement_(const Position& pos) {
+  // reward, raw score reward
+  std::pair<double, double> InputPlacement_(const Position& pos) {
     if (place_stage_) { // step 3
       if (!CheckMovePossible_(stored_mp_lb_, pos)) {
         if (++consecutive_invalid_ == 3) game_over_ = true;
-        return kInvalidReward_;
+        return {kInvalidReward_, 0};
       }
       prev_planned_placement_ = planned_placement_;
       double reward = SetPlannedPlacement_(pos) + step_reward_;
       place_stage_ = false;
       consecutive_invalid_ = 0;
-      return reward;
+      return {reward, 0};
     }
     // step 1
     if (!CheckMovePossible_(stored_mp_lb_, pos)) {
       if (++consecutive_invalid_ == 3) game_over_ = true;
-      return kInvalidReward_;
+      return {kInvalidReward_, 0};
     }
     double reward = 0;
     int level = GetLevel_(start_level_, lines_);
@@ -706,7 +707,8 @@ class Tetris {
     prev_drop_time_ = GetDropTime_(now_piece_, real_placement_, frames_per_drop,
                                    real_lines > 0);
     pieces_++;
-    double score_reward = kRewardMultiplier_ * score_delta;
+    double orig_score_reward = kRewardMultiplier_ * score_delta;
+    double score_reward = orig_score_reward;
     if (pos.y == 0 && real_lines > 2) score_reward *= 1 - left_deduct_;
     if (pos.x >= 18) score_reward *= 1 + kBottomGain_;
     reward += score_reward + step_reward_;
@@ -716,7 +718,7 @@ class Tetris {
     if (std::uniform_int_distribution<int>(0, 5)(rng_) == 0) SetStartPosition_();
     StoreMap_(true);
     game_over_ = MapEmpty_(stored_mp_lb_);
-    return reward;
+    return {reward, orig_score_reward};
   }
 
   bool real_placement_set_;
@@ -793,7 +795,7 @@ class Tetris {
     constexpr double hz_table[] = {12, 13.5, 15, 20, 30};
     constexpr double start_level_table[] = {18, 19, 29};
     constexpr int adj_delay_table[] = {8, 16, 21, 25, 61};
-    constexpr double step_points_table[] = {60, 360, 2000};
+    constexpr double step_points_table[] = {40, 200, 3000};
     int hz_ind = IntRand(0, 4)(rng_);
     int start_level = start_level_table[IntRand(0, 2)(rng_)];
     double hz_avg = hz_table[hz_ind];
@@ -964,11 +966,11 @@ class Tetris {
     }
     // 51-53: step_reward_
     if (step_reward_ >= 1000 * kRewardMultiplier_ * 0.5) {
-      misc[51] = 1; // 2000
-    } else if (step_reward_ >= 200 * kRewardMultiplier_ * 0.5) {
-      misc[52] = 1; // 360
+      misc[51] = 1; // 3000
+    } else if (step_reward_ >= 100 * kRewardMultiplier_ * 0.5) {
+      misc[52] = 1; // 200
     } else {
-      misc[53] = 1; // 60
+      misc[53] = 1; // 40
     }
     // 54: prev_misdrop
     misc[54] = !place_stage_ && prev_misdrop_;
@@ -994,13 +996,13 @@ class Tetris {
     return fseq;
   }
 
-  double InputPlacement(const Position& pos, bool training = true) {
-    if (game_over_) return 0;
+  std::pair<double, double> InputPlacement(const Position& pos, bool training = true) {
+    if (game_over_) return {0, 0};
     bool orig_stage = place_stage_;
     if (pos.rotate >= (int)stored_mp_lb_.size() || pos.x >= kN || pos.y >= kM) {
-      return kInvalidReward_;
+      return {kInvalidReward_, 0};
     }
-    double ret = InputPlacement_(pos);
+    auto ret = InputPlacement_(pos);
     if (training && orig_stage && !place_stage_) TrainingSetPlacement();
     return ret;
   }
@@ -1313,8 +1315,13 @@ static PyObject* Tetris_InputPlacement(Tetris* self, PyObject* args, PyObject* k
                                    &x, &y, &training)) {
     return nullptr;
   }
-  double reward = self->InputPlacement({rotate, x, y}, training);
-  return PyFloat_FromDouble(reward);
+  std::pair<double, double> reward = self->InputPlacement({rotate, x, y}, training);
+  PyObject* r1 = PyFloat_FromDouble(reward.first);
+  PyObject* r2 = PyFloat_FromDouble(reward.second);
+  PyObject* ret = PyTuple_Pack(2, r1, r2);
+  Py_DECREF(r1);
+  Py_DECREF(r2);
+  return ret;
 }
 
 static PyObject* Tetris_SetPreviousPlacement(Tetris* self, PyObject* args, PyObject* kwds) {
@@ -1659,7 +1666,7 @@ static PyObject* Tetris_Search(Tetris* self, PyObject* args, PyObject* kwds) {
     bool flag = true;
     for (int move : moves[0]) {
       Tetris tmp_game = *self;
-      double reward = tmp_game.InputPlacement(ToPlacement(move));
+      double reward = tmp_game.InputPlacement(ToPlacement(move)).first;
       if (!tmp_game.GetPlaceStage() || tmp_game.IsOver()) continue;
       first_steps.push_back({tmp_game.GetMicroadjSequence(), reward + flag * first_gain});
       first_state.push_back(tmp_game.GetState());
@@ -1687,7 +1694,7 @@ static PyObject* Tetris_Search(Tetris* self, PyObject* args, PyObject* kwds) {
       for (int move : moves[i]) {
         Result res;
         res.game = first_games[i];
-        res.reward = res.game.InputPlacement(ToPlacement(move)) + first_steps[i].second + flag * first_gain;
+        res.reward = res.game.InputPlacement(ToPlacement(move)).first + first_steps[i].second + flag * first_gain;
         if (res.game.GetPlaceStage() || res.game.IsOver()) continue;
         res.adj = first_steps[i].first;
         res.nxt = res.game.GetPlannedSequence();
@@ -1851,7 +1858,7 @@ int main() {
       case 'i': {
         int r, x, y;
         scanf("%d %d %d", &r, &x, &y);
-        double rr = t.InputPlacement({r, x, y});
+        double rr = t.InputPlacement({r, x, y}).first;
         printf("Reward: %f\n", rr);
         break;
       }

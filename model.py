@@ -51,7 +51,7 @@ class Model(nn.Module):
                 nn.Linear(1 * kH * kW, 256),
                 nn.ReLU(True),
                 )
-        self.value_last = nn.Linear(256, 1)
+        self.value_last = nn.Linear(256, 2)
 
     @autocast()
     def forward(self, obs: torch.Tensor, return_categorical: bool = True):
@@ -74,7 +74,7 @@ class Model(nn.Module):
         with autocast(enabled = False):
             pi = pi.float()
             pi[valid == 0] = -math.inf
-            value = self.value_last(value.float()).reshape(-1)
+            value = self.value_last(value.float()).reshape(-1, 2).transpose(0, 1)
             if return_categorical: pi = Categorical(logits = pi)
             return pi, value
 

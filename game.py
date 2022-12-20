@@ -19,7 +19,7 @@ class Game:
     def step(self, action):
         r, x, y = action // 200, action // 10 % 20, action % 10
         reward = self.env.InputPlacement(r, x, y)
-        self.reward += reward
+        self.reward += reward[0]
         self.length += 0.5
 
         info = None
@@ -74,8 +74,8 @@ def worker_process(remote, name: str, shms: list, idx: slice, seed: int):
                         rands[i] = random.random()
                 obs, reward, over, info = zip(*result)
                 shm_obs[idx] = np.stack(obs)
-                shm_reward[idx,step] = np.stack(reward)
-                shm_over[idx,step] = np.stack(over)
+                shm_reward[idx,step] = np.array(reward)
+                shm_over[idx,step] = np.array(over)
                 info = list(filter(lambda x: x is not None, info))
                 remote.send(info)
             elif cmd == "reset":

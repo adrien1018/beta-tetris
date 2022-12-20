@@ -18,7 +18,7 @@ class DataGenerator:
 
         # initialize tensors for observations
         shapes = [(self.envs, *kTensorDim),
-                  (self.envs, worker_steps),
+                  (self.envs, worker_steps, 2),
                   (self.envs, worker_steps)]
         types = [np.dtype('float32'), np.dtype('float32'), np.dtype('bool')]
         self.shms = [
@@ -57,7 +57,7 @@ class DataGenerator:
         actions = torch.zeros((self.worker_steps, self.envs), dtype = torch.int32, device = self.device)
         obs = torch.zeros((self.worker_steps, self.envs, *kTensorDim), dtype = torch.float32, device = self.device)
         log_pis = torch.zeros((self.worker_steps, self.envs), dtype = torch.float32, device = self.device)
-        values = torch.zeros((self.worker_steps, self.envs), dtype = torch.float32, device = self.device)
+        values = torch.zeros((self.worker_steps, 2, self.envs), dtype = torch.float32, device = self.device)
 
         if train:
             ret_info = {
@@ -111,9 +111,9 @@ class DataGenerator:
             self.obs = obs_to_torch(self.obs_np, self.device)
 
         # reshape rewards & log rewards
-        reward_max = self.rewards.max()
+        score_max = self.rewards[:,:,1].max()
         if train:
-            ret_info['maxk'].append(reward_max / 1e-2)
+            ret_info['maxk'].append(score_max / 1e-2)
             ret_info['mil_games'].append(self.total_games * 1e-6)
             ret_info['perline'].append(tot_score * 1e-3 / tot_lines)
 
@@ -122,15 +122,16 @@ class DataGenerator:
         samples = {
             'obs': obs,
             'actions': actions,
-            'values': values,
+            'values': values.transpose(1, 2),
             'log_pis': log_pis,
-            'advantages': advantages
+            'advantages': advantages.transpose(1, 2)
         }
         # samples are currently in [time, workers] table, flatten it
         for i in samples:
             samples[i] = samples[i].reshape(-1, *samples[i].shape[2:])
             if not gpu:
                 samples[i] = samples[i].cpu()
+            print(i, samples[i].shape)
         for i in ret_info:
             ret_info[i] = np.mean(ret_info[i])
         return samples, ret_info
@@ -138,25 +139,25 @@ class DataGenerator:
     def _calc_advantages(self, done: np.ndarray, rewards: np.ndarray, values: torch.Tensor) -> torch.Tensor:
         """### Calculate advantages"""
         with torch.no_grad():
-            rewards = torch.transpose(torch.from_numpy(rewards).to(self.device), 0, 1)
+            rewards = torch.permute(torch.from_numpy(rewards).to(self.device), (1, 2, 0))
             done_neg = ~torch.transpose(torch.from_numpy(done).to(self.device), 0, 1)
 
             # advantages table
-            advantages = torch.zeros((self.worker_steps, self.envs), dtype = torch.float32, device = self.device)
-            last_advantage = torch.zeros(self.envs, dtype = torch.float32, device = self.device)
+            advantages = torch.zeros((self.worker_steps, 2, self.envs), dtype = torch.float32, device = self.device)
+            last_advantage = torch.zeros((2, self.envs), dtype = torch.float32, device = self.device)
 
             # $V(s_{t+1})$
             _, last_value = self.model(self.obs)
+            gammas = torch.Tensor([self.gamma, 1.0]).unsqueeze(1).to(self.device)
 
             for t in reversed(range(self.worker_steps)):
                 # mask if episode completed after step $t$
                 mask = done_neg[t]
-                last_value = last_value * mask
-                last_advantage = last_advantage * mask
-                # $\delta_t$
-                delta = rewards[t] + self.gamma * last_value - values[t]
-                # $\hat{A_t} = \delta_t + \gamma \lambda \hat{A_{t+1}}$
-                last_advantage = delta + self.gamma * self.lamda * last_advantage
+                # last_value = last_value * mask
+                # last_advantage = last_advantage * mask
+                # $\delta_t = reward[t] - value[t] + last_value * gammas$
+                # $\hat{A_t} = \delta_t + \gamma \lambda \hat{A_{t+1}} (gam * lam * last_advantage)$
+                last_advantage = rewards[t] - values[t] + gammas * (last_value + self.lamda * last_advantage) * mask
                 # note that we are collecting in reverse order.
                 advantages[t] = last_advantage
                 last_value = values[t]
