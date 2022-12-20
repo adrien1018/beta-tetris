@@ -84,7 +84,7 @@ class DataGenerator:
                 obs[t] = self.obs
                 # sample actions from $\pi_{\theta_{OLD}}$
                 pi, v = self.model(self.obs)
-                values[t] = v
+                values[t] = v[:2] # remove stdev
                 a = pi.sample()
                 actions[t] = a
                 log_pis[t] = pi.log_prob(a)
@@ -122,16 +122,16 @@ class DataGenerator:
         samples = {
             'obs': obs,
             'actions': actions,
-            'values': values.transpose(1, 2),
             'log_pis': log_pis,
-            'advantages': advantages.transpose(1, 2)
         }
         # samples are currently in [time, workers] table, flatten it
         for i in samples:
             samples[i] = samples[i].reshape(-1, *samples[i].shape[2:])
-            if not gpu:
+        samples['values'] = values.transpose(0, 1).reshape(2, -1)
+        samples['advantages'] = advantages.transpose(0, 1).reshape(2, -1)
+        if not gpu:
+            for i in samples:
                 samples[i] = samples[i].cpu()
-            print(i, samples[i].shape)
         for i in ret_info:
             ret_info[i] = np.mean(ret_info[i])
         return samples, ret_info
@@ -148,6 +148,7 @@ class DataGenerator:
 
             # $V(s_{t+1})$
             _, last_value = self.model(self.obs)
+            last_value = last_value[:2] # remove stdev
             gammas = torch.Tensor([self.gamma, 1.0]).unsqueeze(1).to(self.device)
 
             for t in reversed(range(self.worker_steps)):
