@@ -1,6 +1,7 @@
 import math
 import torch, numpy as np
 from torch import nn
+from torch.nn import functional as F
 from torch.distributions import Categorical
 from torch.cuda.amp import autocast
 
@@ -75,8 +76,11 @@ class Model(nn.Module):
             pi = pi.float()
             pi[valid == 0] = -math.inf
             value = self.value_last(value.float()).transpose(0, 1)
+            value_transform = torch.zeros_like(value)
+            value_transform[:2] = value[:2]
+            value_transform[2] = F.softplus(value[2]) + 1e-4
             if return_categorical: pi = Categorical(logits = pi)
-            return pi, value
+            return pi, value_transform
 
 def obs_to_torch(obs: np.ndarray, device) -> torch.Tensor:
     return torch.tensor(obs, dtype = torch.float32, device = device)

@@ -118,11 +118,12 @@ class DataGenerator:
             ret_info['perline'].append(tot_score * 1e-3 / tot_lines)
 
         # calculate advantages
-        advantages = self._calc_advantages(self.done, self.rewards, values)
+        advantages, raw_devs = self._calc_advantages(self.done, self.rewards, values)
         samples = {
             'obs': obs,
             'actions': actions,
             'log_pis': log_pis,
+            'raw_devs': raw_devs,
         }
         # samples are currently in [time, workers] table, flatten it
         for i in samples:
@@ -144,16 +145,19 @@ class DataGenerator:
 
             # advantages table
             advantages = torch.zeros((self.worker_steps, 2, self.envs), dtype = torch.float32, device = self.device)
+            raw_devs = torch.zeros((self.worker_steps, self.envs), dtype = torch.float32, device = self.device)
             last_advantage = torch.zeros((2, self.envs), dtype = torch.float32, device = self.device)
 
             # $V(s_{t+1})$
             _, last_value = self.model(self.obs)
+            last_dev = last_value[2]
             last_value = last_value[:2] # remove stdev
             gammas = torch.Tensor([self.gamma, 1.0]).unsqueeze(1).to(self.device)
 
             for t in reversed(range(self.worker_steps)):
                 # mask if episode completed after step $t$
                 mask = done_neg[t]
+                last_dev *= mask
                 # last_value = last_value * mask
                 # last_advantage = last_advantage * mask
                 # $\delta_t = reward[t] - value[t] + last_value * gammas$
@@ -161,8 +165,9 @@ class DataGenerator:
                 last_advantage = rewards[t] - values[t] + gammas * (last_value + self.lamda * last_advantage) * mask
                 # note that we are collecting in reverse order.
                 advantages[t] = last_advantage
+                raw_devs[t] = last_dev
                 last_value = values[t]
-            return advantages
+            return advantages, raw_devs
 
     def destroy(self):
         try:

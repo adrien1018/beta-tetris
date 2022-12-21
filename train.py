@@ -7,7 +7,7 @@ from typing import Dict, List
 
 import numpy as np, torch
 from torch import optim
-from torch.distributions import Categorical, Normal
+from torch.distributions import Categorical, Normal, kl_divergence
 from torch.cuda.amp import autocast, GradScaler
 
 from labml import monit, tracker, logger, experiment
@@ -120,13 +120,14 @@ class Main:
         samples['returns'] = samples['returns'][0]
         samples['values'] = samples['values'][0]
         samples['advantages'] = Main._normalize(samples['advantages'][0])
+        samples['raw_devs'].clamp_(min=1e-5)
 
     def _calc_loss(self, samples: Dict[str, torch.Tensor], clip_range: float) -> torch.Tensor:
         """## PPO Loss"""
         # Sampled observations are fed into the model to get $\pi_\theta(a_t|s_t)$ and $V^{\pi_\theta}(s_t)$;
         pi_val, value = self.model(samples['obs'], False)
         pi = Categorical(logits = pi_val)
-        raw_dist = Normal(value[1], torch.clamp(value[2], min=1e-3))
+        raw_dist = Normal(value[1], value[2])
         value = value[0]
 
         # #### Policy
@@ -159,7 +160,7 @@ class Main:
         vf_loss = 0.5 * vf_loss.mean()
 
         # #### Score distribution
-        raw_loss = -raw_dist.log_prob(samples['raw_returns']).mean()
+        raw_loss = kl_divergence(Normal(samples['raw_returns'], samples['raw_devs']), raw_dist).mean()
 
         # we want to maximize $\mathcal{L}^{CLIP+VF+EB}(\theta)$
         # so we take the negative of it as the loss
@@ -203,7 +204,7 @@ class Main:
                 self.set_game_params(self.get_game_params())
                 self.set_weight_param(self.c.entropy_weight(), self.c.raw_weight())
             if (update + 1) % 25 == 0: logger.log()
-            if (update + 1) % 500 == 0: experiment.save_checkpoint()
+            if (update + 1) % 200 == 0: experiment.save_checkpoint()
 
 import argparse
 
