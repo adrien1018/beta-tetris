@@ -10,6 +10,7 @@ from torch import optim
 from torch.distributions import Categorical, Normal, kl_divergence
 from torch.cuda.amp import autocast, GradScaler
 
+import labml.lab
 from labml import monit, tracker, logger, experiment
 from labml.configs import FloatDynamicHyperParam
 
@@ -50,7 +51,7 @@ class Main:
 
         # generator
         cur_params = self.get_game_params()
-        self.generator = GeneratorProcess(self.name, self.model, self.c, cur_params)
+        self.generator = GeneratorProcess(self.name, self.model, self.c, cur_params, device)
         self.set_game_params(cur_params)
 
     def get_game_params(self):
@@ -204,11 +205,20 @@ class Main:
                 self.set_game_params(self.get_game_params())
                 self.set_weight_param(self.c.entropy_weight(), self.c.raw_weight())
             if (update + 1) % 25 == 0: logger.log()
-            if (update + 1) % 200 == 0: experiment.save_checkpoint()
+            if (update + 1) % self.c.save_interval == 0: experiment.save_checkpoint()
 
-import argparse
+
+def claim_experiment(uuid: str):
+    from urllib.request import Request, urlopen
+    from urllib.parse import urlsplit, urlunsplit
+    url = labml.lab.get_info()['configs']['web_api']
+    scheme, host, _, _, _ = urlsplit(url)
+    url = urlunsplit((scheme, host, f'/api/v1/run/{uuid}/claim', '', ''))
+    urlopen(Request(url, method='PUT'))
+
 
 if __name__ == "__main__":
+    torch.backends.cudnn.benchmark = True
     conf, args, _ = LoadConfig()
     m = Main(conf, args['name'])
     experiment.add_model_savers({
@@ -216,8 +226,20 @@ if __name__ == "__main__":
             'scaler': TorchSaver('scaler', m.scaler),
             'optimizer': TorchSaver('optimizer', m.optimizer, not args['ignore_optimizer']),
         })
-    if len(args['uuid']): experiment.load(args['uuid'], args['checkpoint'])
+    if len(args['uuid']):
+        try:
+            uuid = '{}-{:03d}'.format(args['name'], int(args['uuid']))
+        except ValueError:
+            uuid = args['uuid']
+            if uuid == 'last':
+                nd = 1
+                while os.path.exists('logs/{0}/{0}-{1:03d}'.format(args['name'], nd)):
+                    nd += 1
+                if nd > 1:
+                    uuid = '{}-{:03d}'.format(args['name'], nd - 1)
+        experiment.load(uuid, args['checkpoint'])
     with experiment.start():
+        claim_experiment(experiment.get_uuid())
         try: m.run_training_loop()
         except Exception as e: print(traceback.format_exc())
         finally: m.destroy()

@@ -35,6 +35,8 @@ class Configs(BaseConfigs):
     reward_ratio: float = FloatDynamicHyperParam(0.2, range_ = (0, 1))
     normal_rate: float = FloatDynamicHyperParam(1.0, range_ = (0, 1))
 
+    save_interval: int = 500
+
 def LoadConfig(with_experiment = True):
     parser = argparse.ArgumentParser()
     if with_experiment:
@@ -62,13 +64,11 @@ def LoadConfig(with_experiment = True):
         if args[key] is not None:
             conf.__getattribute__(key).set_value(args[key])
     if with_experiment:
-        try:
-            if len(args['name']) == 32:
-                int(args['name'], 16)
-                parser.error('Experiment name should not be uuid-like')
-        except ValueError: pass
         os.makedirs('logs/{}'.format(args['name']), exist_ok = True)
-        experiment.create(name = args['name'])
+        uuid = 1
+        while os.path.exists('logs/{0}/{0}-{1:03d}'.format(args['name'], uuid)):
+            uuid += 1
+        experiment.create(name = args['name'], uuid = '{0}-{1:03d}'.format(args['name'], uuid))
         experiment.configs(conf, override_dict)
     else:
         for key, val in override_dict:

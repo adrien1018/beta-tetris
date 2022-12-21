@@ -115,7 +115,8 @@ class DataGenerator:
         if train:
             ret_info['maxk'].append(score_max / 1e-2)
             ret_info['mil_games'].append(self.total_games * 1e-6)
-            ret_info['perline'].append(tot_score * 1e-3 / tot_lines)
+            if tot_lines > 0:
+                ret_info['perline'].append(tot_score * 1e-3 / tot_lines)
 
         # calculate advantages
         advantages, raw_devs = self._calc_advantages(self.done, self.rewards, values)
@@ -133,8 +134,11 @@ class DataGenerator:
         if not gpu:
             for i in samples:
                 samples[i] = samples[i].cpu()
-        for i in ret_info:
-            ret_info[i] = np.mean(ret_info[i])
+        for i in list(ret_info):
+            if ret_info[i]:
+                ret_info[i] = np.mean(ret_info[i])
+            else:
+                del ret_info[i]
         return samples, ret_info
 
     def _calc_advantages(self, done: np.ndarray, rewards: np.ndarray, values: torch.Tensor) -> torch.Tensor:
@@ -178,6 +182,7 @@ class DataGenerator:
             i.unlink()
 
 def generator_process(remote, name, channels, blocks, *args):
+    torch.backends.cudnn.benchmark = True
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     try:
         model = Model(channels, blocks).to(device)
@@ -205,7 +210,8 @@ def generator_process(remote, name, channels, blocks, *args):
         remote.close()
 
 class GeneratorProcess:
-    def __init__(self, name, model, c, game_params):
+    def __init__(self, name, model, c, game_params, device):
+        self.device = device
         self.child, parent = Pipe()
         ctx = torch.multiprocessing.get_context('spawn')
         self.process = ctx.Process(target = generator_process,
@@ -229,7 +235,7 @@ class GeneratorProcess:
         self.child.send(('get_data', None))
         data, info = self.child.recv()
         for i in data:
-            data[i] = data[i].cuda()
+            data[i] = data[i].to(self.device)
         return data, info
 
     def Close(self):
