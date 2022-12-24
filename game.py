@@ -65,10 +65,9 @@ def worker_process(remote, name: str, shms: list, idx: slice, seed: int):
                 step, data, gb = data
                 result = []
                 for i in range(num):
-                    if save and rands[i] < 0.005:
-                        print(gb, 'Game', i, data[i] // 200, data[i] // 10 % 20, data[i] % 10)
-                        games[i].env.PrintAllState()
-                        print('', flush = True)
+                    if save and random.random() < 0.005:
+                        print(gb, end=' ', flush=True)
+                        games[i].env.PrintTetrisCol()
                     result.append(games[i].step(data[i]))
                     if result[-1][3] is not None:
                         rands[i] = random.random()

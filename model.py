@@ -78,7 +78,7 @@ class Model(nn.Module):
             value = self.value_last(value.float()).transpose(0, 1)
             value_transform = torch.zeros_like(value)
             value_transform[:2] = value[:2]
-            value_transform[2] = F.softplus(value[2]) + 1e-4
+            value_transform[2] = F.softplus(value[2])
             if return_categorical: pi = Categorical(logits = pi)
             return pi, value_transform
 

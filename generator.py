@@ -15,6 +15,7 @@ class DataGenerator:
         self.gamma, self.lamda = game_params[-2:]
         self.device = next(self.model.parameters()).device
         self.total_games = 0
+        # TODO: Add networks
 
         # initialize tensors for observations
         shapes = [(self.envs, *kTensorDim),
@@ -143,9 +144,12 @@ class DataGenerator:
 
     def _calc_advantages(self, done: np.ndarray, rewards: np.ndarray, values: torch.Tensor) -> torch.Tensor:
         """### Calculate advantages"""
+        # TODO: generate intrinsic rewards
+        # TODO: 0(value), 1(raw), 2(dev) -> 0(value), 1(intrinsic), 2(raw), 3(dev)
         with torch.no_grad():
             rewards = torch.permute(torch.from_numpy(rewards).to(self.device), (1, 2, 0))
             done_neg = ~torch.transpose(torch.from_numpy(done).to(self.device), 0, 1)
+            # done_neg repeat and set [:,1] to 1
 
             # advantages table
             advantages = torch.zeros((self.worker_steps, 2, self.envs), dtype = torch.float32, device = self.device)
@@ -157,16 +161,21 @@ class DataGenerator:
             last_dev = last_value[2]
             last_value = last_value[:2] # remove stdev
             gammas = torch.Tensor([self.gamma, 1.0]).unsqueeze(1).to(self.device)
+            lamdas = torch.Tensor([self.lamda, 1.0]).unsqueeze(1).to(self.device)
+            # last_dev = last_value[3]
+            # last_value = last_value[:3] # remove stdev
+            # gammas = torch.Tensor([self.gamma, self.gamma_int, 1.0]).unsqueeze(1).to(self.device)
+            # lamdas = torch.Tensor([self.lamda, self.lamda, 1.0]).unsqueeze(1).to(self.device)
 
             for t in reversed(range(self.worker_steps)):
                 # mask if episode completed after step $t$
                 mask = done_neg[t]
-                last_dev *= mask
+                last_dev *= mask # done_neg[t,0]
                 # last_value = last_value * mask
                 # last_advantage = last_advantage * mask
                 # $\delta_t = reward[t] - value[t] + last_value * gammas$
                 # $\hat{A_t} = \delta_t + \gamma \lambda \hat{A_{t+1}} (gam * lam * last_advantage)$
-                last_advantage = rewards[t] - values[t] + gammas * (last_value + self.lamda * last_advantage) * mask
+                last_advantage = rewards[t] - values[t] + gammas * (last_value + lamdas * last_advantage) * mask # done_neg[t]
                 # note that we are collecting in reverse order.
                 advantages[t] = last_advantage
                 raw_devs[t] = last_dev

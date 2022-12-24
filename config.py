@@ -6,7 +6,7 @@ from labml.configs import BaseConfigs, FloatDynamicHyperParam
 class Configs(BaseConfigs):
     # #### Configurations
     # $\gamma$ and $\lambda$ for advantage calculation
-    gamma: float = FloatDynamicHyperParam(0.999, range_ = (0.98, 1))
+    gamma: float = FloatDynamicHyperParam(0.99 ** 0.5, range_ = (0.98, 1))
     lamda: float = FloatDynamicHyperParam(0.93, range_ = (0.9, 1))
     # number of updates
     updates: int = 200000

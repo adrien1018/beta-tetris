@@ -24,6 +24,12 @@
 
 #ifdef DEBUG_METHODS
 #include <cstdio>
+
+uint64_t clear_col_count[4][10] = {};
+#endif
+
+#if defined(MIRROR_PIECES) + defined(MIRROR_PIECES_SAME_ROTATION) + defined(MIRROR_PIECES_COMPAT) > 1
+#error "Only one of MIRROR_PIECES, MIRROR_PIECES_SAME_ROTATION and MIRROR_PIECES_COMPAT can be specified"
 #endif
 
 class Tetris {
@@ -58,6 +64,13 @@ class Tetris {
       return rotate == pos.rotate && x == pos.x && y == pos.y;
     }
     bool operator!=(const Position& pos) const { return !(*this == pos); }
+#ifdef MIRROR_PIECES_COMPAT
+    Position Adjust(int piece) const {
+      if ((piece == 2 || piece == 4) && rotate == 1) return {rotate, x, y + 1};
+      if (piece == 6 && rotate == 0) return {rotate, x, y - 1};
+      return *this;
+    }
+#endif
   };
 
   using State = std::array<std::array<std::array<float, kM>, kN>, 14>;
@@ -71,6 +84,16 @@ class Tetris {
   // # Game constants
   // Piece generation probabilities
   static constexpr int kTransitionProb_[kT][kT] = {
+#ifdef MIRROR_RNG
+  // T  J  Z  O  S  L  I (next)
+    {1, 5, 5, 5, 6, 5, 5}, // T (current)
+    {6, 1, 5, 5, 5, 5, 5}, // J
+    {5, 5, 2, 5, 5, 5, 5}, // Z
+    {5, 5, 5, 2, 5, 5, 5}, // O
+    {5, 5, 5, 5, 1, 6, 5}, // S
+    {6, 5, 5, 5, 5, 1, 5}, // L
+    {5, 5, 6, 5, 5, 5, 1}, // I
+#else
   // T  J  Z  O  S  L  I (next)
     {1, 5, 6, 5, 5, 5, 5}, // T (current)
     {6, 1, 5, 5, 5, 5, 5}, // J
@@ -79,8 +102,19 @@ class Tetris {
     {5, 5, 5, 5, 2, 5, 5}, // S
     {6, 5, 5, 5, 5, 1, 5}, // L
     {5, 5, 5, 5, 6, 5, 1}, // I
+#endif
   };
   static constexpr int kTransitionProbDrought_[kT][kT] = {
+#ifdef MIRROR_RNG
+  // T  J  Z  O  S  L  I (next)
+    { 3,11,11,11,14,11, 3}, // T (current)
+    {14, 3,11,11,11,11, 3}, // J
+    {11,11, 6,11,11,11, 3}, // Z
+    {11,11,11, 6,11,11, 3}, // O
+    {11,11,11,11, 3,14, 3}, // S
+    {14,11,11,11,11, 3, 3}, // L
+    {10,10,12,10,10,10, 2}, // I
+#else
   // T  J  Z  O  S  L  I (next)
     { 3,11,14,11,11,11, 3}, // T (current)
     {14, 3,11,11,11,11, 3}, // J
@@ -89,6 +123,7 @@ class Tetris {
     {11,11,11,11, 6,11, 3}, // S
     {14,11,11,11,11, 3, 3}, // L
     {10,10,10,10,12,10, 2}, // I
+#endif
   };
   // Tetraminos
   using Poly_ = std::array<std::pair<int, int>, 4>;
@@ -112,8 +147,13 @@ class Tetris {
   static constexpr int kLineClearDelay_ = 20;
   // 1000 / (30 * 525 / 1.001 * 455 / 2 / 2 / (341 * 262 - 0.5) * 3)
   static constexpr double kFrameLength_ = 655171. / 39375;
-  static constexpr Position kStartPositionAbnorm_ = {0, 0, 4}; // (r, x, y)
+#if defined(MIRROR_PIECES) || defined(MIRROR_PIECES_SAME_ROTATION) || defined(MIRROR_PIECES_COMPAT)
+  static constexpr Position kStartPositionAbnorm_ = {0, 0, 5}; // (r, x, y)
+  static constexpr Position kStartPositionNorm_ = {0, 0, 4}; // (r, x, y)
+#else
+  static constexpr Position kStartPositionAbnorm_ = {0, 0, 3}; // (r, x, y)
   static constexpr Position kStartPositionNorm_ = {0, 0, 5}; // (r, x, y)
+#endif
 
   // # Game state
   int start_level_, lines_, score_, pieces_;
@@ -144,8 +184,6 @@ class Tetris {
 
   // Reward model
   static constexpr double kRewardMultiplier_ = 1e-5; // 10 per maxout
-  // A very small reward given to every half-rounds. Used to guide the very
-  //   early stage of training.
   static constexpr double kInvalidReward_ = -0.3;
   // Provide a large reward deduction if the agent makes an invalid placement
   static constexpr double kInfeasibleReward_ = -0.01;
@@ -156,10 +194,10 @@ class Tetris {
   // Provide a small reward deduction each time the agent makes an misdrop;
   //   this can guide the agent to avoid high-risk movements
   static constexpr double kBottomGain_ = 0.1;
+  // Provide a reward difference to guide the agent to use right well strategy.
+  double left_deduct_ = 0.2;
   // Provide a reward gain for bottom row scoring to guide the agent to not
   //   score dirty tetrises.
-  double left_deduct_ = 0.2;
-  // Provide a reward difference to guide the agent to use right well strategy.
   // This can be decreased during training.
   double penalty_multiplier_ = 1.0;
   // Multiplier of misdrop & infeasible penalty. Set to 0 in early training to
@@ -225,7 +263,11 @@ class Tetris {
         for (int y = 0; y < kM; y++) {
           bool flag = true;
           for (int i = 0; i < 4; i++) {
+#ifdef MIRROR_PIECES
+            int nx = pl[i].first + x, ny = -pl[i].second + y;
+#else
             int nx = pl[i].first + x, ny = pl[i].second + y;
+#endif
             if (ny < 0 || nx >= kN || ny >= kM || (nx >= 0 && field[nx][ny])) {
               flag = false;
               break;
@@ -729,6 +771,11 @@ class Tetris {
     real_placement_ = pos;
     int real_lines = PlaceField(field_, now_piece_, real_placement_);
     int level = GetLevel_(start_level_, lines_);
+#ifdef DEBUG_METHODS
+    if (real_lines > 0) {
+      clear_col_count[real_lines-1][pos.y]++;
+    }
+#endif
     if (real_lines == 4) {
       tetris_count_++;
       if (pos.y == 9) right_tetris_count_++;
@@ -834,7 +881,11 @@ class Tetris {
   static int PlaceField(Field& field, int piece, const Position& pos) {
     auto& pl = kBlocks_[piece][pos.rotate];
     for (auto& i : pl) {
+#ifdef MIRROR_PIECES
+      int nx = pos.x + i.first, ny = pos.y - i.second;
+#else
       int nx = pos.x + i.first, ny = pos.y + i.second;
+#endif
       if (nx >= kN || ny >= kM || nx < 0 || ny < 0) continue;
       field[nx][ny] = true;
     }
@@ -897,10 +948,28 @@ class Tetris {
         }
       }
     }
+    int cur_piece = place_stage_ ? next_piece_ : now_piece_;
+#ifdef MIRROR_PIECES_COMPAT
+    if (cur_piece == 2 || cur_piece == 4) {
+      for (int i = 0; i < kN; i++) {
+        for (int j = 0; j < kM - 1; j++) {
+          ret[9 + 1][i][j] = ret[9 + 1][i][j + 1];
+        }
+        ret[9 + 1][i][kM - 1] = 0;
+      }
+    } else if (cur_piece == 6) {
+      for (int i = 0; i < kN; i++) {
+        for (int j = kM - 1; j > 0; j--) {
+          ret[9 + 0][i][j] = ret[9 + 0][i][j - 1];
+        }
+        ret[9 + 0][i][0] = 0;
+      }
+    }
+#endif
     // misc
     float* misc = (float*)ret[13].data();
     // 0-6: current
-    misc[0 + (place_stage_ ? next_piece_ : now_piece_)] = 1;
+    misc[0 + cur_piece] = 1;
     // 7-14: next / 7(if place_stage_)
     misc[place_stage_ ? 14 : 7 + next_piece_] = 1;
     // 15-17: start (18/19/29)
@@ -914,11 +983,11 @@ class Tetris {
       pieces -= reduce * 10 / 4;
       lines -= reduce;
     }
-    misc[18] = level * 1e-1;
+    misc[18] = level * 1e-1 - 1;
     // 19: lines
-    misc[19] = lines * 2e-2;
+    misc[19] = lines * 1e-2 - 1;
     // 20: pieces
-    misc[20] = pieces * 8e-3;
+    misc[20] = pieces * 4e-3 - 1;
     // 21-23: speed (29/19/18)
     misc[20 + (GetFramesPerDrop_(level) - 1)] = 1;
     // 24: drought
@@ -999,10 +1068,15 @@ class Tetris {
   std::pair<double, double> InputPlacement(const Position& pos, bool training = true) {
     if (game_over_) return {0, 0};
     bool orig_stage = place_stage_;
-    if (pos.rotate >= (int)stored_mp_lb_.size() || pos.x >= kN || pos.y >= kM) {
+#ifdef MIRROR_PIECES_COMPAT
+    auto npos = pos.Adjust(orig_stage ? next_piece_ : now_piece_);
+#else
+    auto& npos = pos;
+#endif
+    if (npos.rotate >= (int)stored_mp_lb_.size() || npos.x >= kN || npos.y >= kM) {
       return {kInvalidReward_, 0};
     }
-    auto ret = InputPlacement_(pos);
+    auto ret = InputPlacement_(npos);
     if (training && orig_stage && !place_stage_) TrainingSetPlacement();
     return ret;
   }
@@ -1037,7 +1111,11 @@ class Tetris {
   void SetNextPiece(int piece) { next_piece_ = piece; }
 
   bool SetPreviousPlacement(const Position& pos) {
+#ifdef MIRROR_PIECES_COMPAT
+    return SetRealPlacement_(pos.Adjust(now_piece_));
+#else
     return SetRealPlacement_(pos);
+#endif
   }
 
   // Set a particular board; the next step will be step 1.
@@ -1233,9 +1311,41 @@ public:
     printf("\nprvmis %.1f\n", misc[54]);
     fflush(stdout);
   }
+
+  void PrintTetrisCol() const {
+    static constexpr char kNames[][7] = {"Single", "Double", "Triple", "Tetris"};
+    for (int k = 0; k < 4; k++) {
+      printf("%s", kNames[k]);
+      for (int i = 0; i < 10; i++) printf(" %lu", clear_col_count[k][i]);
+      printf("%c", " \n"[k==3]);
+    }
+    fflush(stdout);
+  }
 #endif
 };
 
+#if defined(MIRROR_PIECES_SAME_ROTATION) || defined(MIRROR_PIECES_COMPAT)
+decltype(Tetris::kBlocks_) Tetris::kBlocks_ = {
+    {{{{1, 0}, {0, 0}, {0, 1}, {0, -1}}}, // T
+     {{{1, 0}, {0, 0}, {-1, 0}, {0, -1}}},
+     {{{0, -1}, {0, 0}, {0, 1}, {-1, 0}}},
+     {{{1, 0}, {0, 0}, {0, 1}, {-1, 0}}}},
+    {{{{0, -1}, {0, 0}, {0, 1}, {1, 1}}}, // J
+     {{{-1, 0}, {0, 0}, {1, -1}, {1, 0}}},
+     {{{-1, -1}, {0, -1}, {0, 0}, {0, 1}}},
+     {{{-1, 0}, {-1, 1}, {0, 0}, {1, 0}}}},
+    {{{{0, -1}, {0, 0}, {1, 0}, {1, 1}}}, // Z
+     {{{-1, 0}, {0, -1}, {0, 0}, {1, -1}}}},
+    {{{{0, -1}, {0, 0}, {1, -1}, {1, 0}}}}, // O
+    {{{{0, 0}, {0, 1}, {1, -1}, {1, 0}}}, // S
+     {{{-1, -1}, {0, -1}, {0, 0}, {1, 0}}}},
+    {{{{0, -1}, {0, 0}, {0, 1}, {1, -1}}}, // L
+     {{{-1, -1}, {-1, 0}, {0, 0}, {1, 0}}},
+     {{{-1, 1}, {0, -1}, {0, 0}, {0, 1}}},
+     {{{-1, 0}, {0, 0}, {1, 0}, {1, 1}}}},
+    {{{{0, -1}, {0, 0}, {0, 1}, {0, 2}}}, // I
+     {{{-2, 0}, {-1, 0}, {0, 0}, {1, 0}}}}};
+#else
 decltype(Tetris::kBlocks_) Tetris::kBlocks_ = {
     {{{{1, 0}, {0, 0}, {0, 1}, {0, -1}}}, // T
      {{{1, 0}, {0, 0}, {-1, 0}, {0, -1}}},
@@ -1256,6 +1366,7 @@ decltype(Tetris::kBlocks_) Tetris::kBlocks_ = {
      {{{-1, 0}, {0, 0}, {1, 0}, {1, 1}}}},
     {{{{0, -2}, {0, -1}, {0, 0}, {0, 1}}}, // I
      {{{-2, 0}, {-1, 0}, {0, 0}, {1, 0}}}}};
+#endif
 #ifndef _MSC_VER
 #define TETRIS_DEFINE_STATIC(x) decltype(Tetris::x) Tetris::x
 TETRIS_DEFINE_STATIC(kTransitionProb_);
@@ -1768,6 +1879,11 @@ static PyObject* Tetris_PrintAllState(Tetris* self, PyObject* Py_UNUSED(ignored)
   Py_RETURN_NONE;
 }
 
+static PyObject* Tetris_PrintTetrisCol(Tetris* self, PyObject* Py_UNUSED(ignored)) {
+  self->PrintTetrisCol();
+  Py_RETURN_NONE;
+}
+
 #endif
 
 static PyMethodDef py_tetris_methods[] = {
@@ -1806,6 +1922,8 @@ static PyMethodDef py_tetris_methods[] = {
      "Print current field"},
     {"PrintAllState", (PyCFunction)Tetris_PrintAllState, METH_NOARGS,
      "Print all internal state"},
+    {"PrintTetrisCol", (PyCFunction)Tetris_PrintTetrisCol, METH_NOARGS,
+     "Print tetris column stats"},
 #endif
     {nullptr}};
 
