@@ -70,6 +70,11 @@ class Tetris {
       if (piece == 6 && rotate == 0) return {rotate, x, y - 1};
       return *this;
     }
+    Position RevAdjust(int piece) const {
+      if ((piece == 2 || piece == 4) && rotate == 1) return {rotate, x, y - 1};
+      if (piece == 6 && rotate == 0) return {rotate, x, y + 1};
+      return *this;
+    }
 #endif
   };
 
@@ -925,19 +930,24 @@ class Tetris {
     // 5-8: planned_placement_ (place_stage_ = false)
     // 9-12: possible placements
     // 13: misc
+#ifdef MIRROR_PIECES_COMPAT
+    auto planned_placement = planned_placement_.RevAdjust(place_stage_ ? now_piece_ : next_piece_);
+#else
+    auto& planned_placement = planned_placement_;
+#endif
     if (place_stage_) {
       for (int i = 0; i < kN; i++) {
         for (int j = 0; j < kM; j++) ret[0][i][j] = 1 - temp_field_[i][j];
       }
-      ret[1 + planned_placement_.rotate][planned_placement_.x]
-         [planned_placement_.y] = 1;
+      ret[1 + planned_placement.rotate][planned_placement.x]
+         [planned_placement.y] = 1;
     } else {
       for (int i = 0; i < kN; i++) {
         for (int j = 0; j < kM; j++) ret[0][i][j] = 1 - field_[i][j];
       }
       if (planned_seq_.valid) {
-        ret[5 + planned_placement_.rotate][planned_placement_.x]
-          [planned_placement_.y] = 1;
+        ret[5 + planned_placement.rotate][planned_placement.x]
+          [planned_placement.y] = 1;
       }
     }
     for (size_t r = 0; r < stored_mp_lb_.size(); r++) {
