@@ -3,8 +3,8 @@
 from setuptools import Extension, setup
 import numpy
 
-#args = ['-DDEBUG_METHODS']
-args = ['-DDEBUG_METHODS', '-DMIRROR_PIECES_COMPAT']
+args = ['-DDEBUG_METHODS']
+#args = ['-DDEBUG_METHODS', '-DMIRROR_PIECES_COMPAT']
 #args = ['-DDEBUG_METHODS', '-fsanitize=address', '-fsanitize=undefined']
 
 name = 'tetris'
