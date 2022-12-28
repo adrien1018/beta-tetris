@@ -5,6 +5,19 @@ from labml.configs import BaseConfigs, FloatDynamicHyperParam
 
 class Configs(BaseConfigs):
     # #### Configurations
+    ## NN
+    start_blocks: int = 6
+    end_blocks: int = 2
+    channels: int = 256
+    global_pooling_channels: int = 192
+    num_global_pooling: int = 3
+
+    def model_args(self):
+        return (self.start_blocks, self.end_blocks, self.channels,
+                self.global_pooling_channels, self.num_global_pooling)
+
+    ## training
+    lr: float = FloatDynamicHyperParam(1e-4, range_ = (0, 1e-3))
     # $\gamma$ and $\lambda$ for advantage calculation
     gamma: float = FloatDynamicHyperParam(0.99 ** 0.5, range_ = (0.98, 1))
     lamda: float = FloatDynamicHyperParam(0.93, range_ = (0.9, 1))
@@ -19,16 +32,17 @@ class Configs(BaseConfigs):
     worker_steps: int = 256
     # size of mini batches
     n_update_per_epoch: int = 32
+    # calculate loss in batches of mini_batch_size
     mini_batch_size: int = 1024
-    channels: int = 192
-    blocks: int = 8
-    lr: float = FloatDynamicHyperParam(1e-4, range_ = (0, 1e-3))
+
+    ## loss calculation
     clipping_range: float = 0.2
     vf_weight: float = 0.5
     raw_weight: float = FloatDynamicHyperParam(3e-4, range_ = (0, 0.1))
     entropy_weight: float = FloatDynamicHyperParam(2.2e-2, range_ = (0, 5e-2))
     reg_l2: float = FloatDynamicHyperParam(0., range_ = (0, 5e-5))
 
+    # game initialization
     pre_trans: float = FloatDynamicHyperParam(0.7, range_ = (0, 1))
     left_deduct: float = FloatDynamicHyperParam(0.0, range_ = (0, 1))
     neg_mul: float = FloatDynamicHyperParam(0.0, range_ = (0, 1))

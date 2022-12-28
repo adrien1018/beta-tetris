@@ -119,19 +119,28 @@ class DataGenerator:
             if tot_lines > 0:
                 ret_info['perline'].append(tot_score * 1e-3 / tot_lines)
 
-        # calculate advantages
-        advantages, raw_devs = self._calc_advantages(self.done, self.rewards, values)
-        samples = {
-            'obs': obs,
-            'actions': actions,
-            'log_pis': log_pis,
-            'raw_devs': raw_devs,
-        }
+            # calculate advantages
+            advantages, raw_devs = self._calc_advantages(self.done, self.rewards, values)
+            samples = {
+                'obs': obs,
+                'actions': actions,
+                'log_pis': log_pis,
+                'raw_devs': raw_devs,
+                'values': values.transpose(0, 1).reshape(1, 2, -1),
+                'advantages': advantages.transpose(0, 1).reshape(1, 2, -1),
+            }
+        else:
+            samples = {
+                'obs': obs,
+                'log_pis': log_pis,
+                'values': values.transpose(0, 1).reshape(1, 2, -1),
+            }
+
         # samples are currently in [time, workers] table, flatten it
+        # for values & advantages, this just flattens the first two dimensions
         for i in samples:
             samples[i] = samples[i].reshape(-1, *samples[i].shape[2:])
-        samples['values'] = values.transpose(0, 1).reshape(2, -1)
-        samples['advantages'] = advantages.transpose(0, 1).reshape(2, -1)
+
         if not gpu:
             for i in samples:
                 samples[i] = samples[i].cpu()
@@ -190,11 +199,11 @@ class DataGenerator:
             i.close()
             i.unlink()
 
-def generator_process(remote, name, channels, blocks, *args):
+def generator_process(remote, name, model_args, *args):
     torch.backends.cudnn.benchmark = True
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     try:
-        model = Model(channels, blocks).to(device)
+        model = Model(*model_args).to(device)
         generator = DataGenerator(name, model, *args)
         samples = None
         while True:
@@ -224,7 +233,7 @@ class GeneratorProcess:
         self.child, parent = Pipe()
         ctx = torch.multiprocessing.get_context('spawn')
         self.process = ctx.Process(target = generator_process,
-                args = (parent, name, c.channels, c.blocks, c.n_workers, c.env_per_worker, c.worker_steps, game_params))
+                args = (parent, name, c.model_args(), c.n_workers, c.env_per_worker, c.worker_steps, game_params))
         self.process.start()
         self.SendModel(model)
 

@@ -14,19 +14,41 @@ kBoardChannel = 1 + 15
 kOtherChannel = (kOrd - 1) + (55 - 15)
 
 
-class ConvBlock(nn.Module):
-    def __init__(self, ch):
+# Global pooling in KataGo
+class GlobalPooling(nn.Module):
+    def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.main = nn.Sequential(
-                nn.Conv2d(ch, ch, 3, padding = 1),
-                nn.BatchNorm2d(ch),
+        assert out_channels < in_channels
+        pool_channels = in_channels - out_channels
+        self.out_channels = out_channels
+        self.before = nn.Sequential(
+                nn.BatchNorm2d(pool_channels),
                 nn.ReLU(True),
-                nn.Conv2d(ch, ch, 3, padding = 1),
-                nn.BatchNorm2d(ch),
                 )
-        self.final = nn.ReLU(True)
+        self.after = nn.Linear(2 * pool_channels, out_channels)
+
     def forward(self, x):
-        return self.final(self.main(x) + x)
+        mid = self.before(x[:,self.out_channels:])
+        pool = torch.cat([mid.mean((2, 3)), mid.amax((2, 3))], 1)
+        return self.after(pool).view(-1, self.out_channels, 1, 1) + x[:,:self.out_channels]
+
+
+class ConvBlock(nn.Module):
+    def __init__(self, channels, global_pooling_channels = None):
+        super().__init__()
+        back_channels = global_pooling_channels or channels
+        self.main = nn.Sequential(
+                nn.BatchNorm2d(channels),
+                nn.ReLU(True),
+                nn.Conv2d(channels, channels, 3, padding = 1),
+                *([GlobalPooling(channels, back_channels)] if global_pooling_channels else []),
+                nn.BatchNorm2d(back_channels),
+                nn.ReLU(True),
+                nn.Conv2d(back_channels, channels, 3, padding = 1),
+                )
+
+    def forward(self, x):
+        return self.main(x) + x
 
 
 class LinearWithChannels(nn.Module):
@@ -35,7 +57,7 @@ class LinearWithChannels(nn.Module):
     out_features: int
     weight: torch.Tensor
 
-    def __init__(self, channels:int, in_features: int, out_features: int, bias: bool = True,
+    def __init__(self, channels: int, in_features: int, out_features: int, bias: bool = True,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(LinearWithChannels, self).__init__()
@@ -69,6 +91,17 @@ class LinearWithChannels(nn.Module):
         )
 
 
+PIECE_MAP = [
+    [0,1,2,3],
+    [4,5,6,7],
+    [8,9,0,0],
+    [10,0,0,0],
+    [11,12,0,0],
+    [13,14,15,16],
+    [17,18,0,0],
+]
+
+
 def preprocess(obs: torch.Tensor):
     batch = obs.shape[0]
     # q1, misc1: before intermediate level
@@ -82,36 +115,48 @@ def preprocess(obs: torch.Tensor):
     q2[:,:kOrd-1] = obs[:,1:kOrd]
     q2[:,kOrd-1:] = misc2.view(batch, -1, 1, 1)
     # for gather
+    nmap = torch.LongTensor(PIECE_MAP).to(obs.device)
     pieces = torch.argmax(misc1[:,:7], 1)
-    indices = pieces.view(-1, 1, 1, 1).repeat(1, 1, 4, kH * kW)
+    indices = torch.arange(batch, device = obs.device).unsqueeze(1), nmap[pieces]
     valid = obs[:,9:13].view(batch, -1)
     return q1, q2, valid, indices
 
 
 class Model(nn.Module):
-    def __init__(self, ch, blk):
+    def __init__(self, start_blocks, end_blocks, channels,
+                 global_pooling_channels, num_global_pooling):
         super().__init__()
+        total_blocks = start_blocks + end_blocks
+        if num_global_pooling * total_blocks // (num_global_pooling + 1) < start_blocks:
+            global_pooling_positions = {(i * start_blocks - 1) // num_global_pooling for i in range(1, num_global_pooling)}
+            global_pooling_positions.add(start_blocks)
+        else:
+            global_pooling_positions = {(i * total_blocks - 1) // (num_global_pooling + 1) for i in range(1, num_global_pooling + 1)}
+
         self.start = nn.Sequential(
-                nn.Conv2d(kBoardChannel, ch, 5, padding = 2),
-                nn.BatchNorm2d(ch),
+                nn.Conv2d(kBoardChannel, channels, 5, padding = 2),
+                nn.BatchNorm2d(channels),
                 nn.ReLU(True),
-                *[ConvBlock(ch) for i in range(blk-min(2, blk//2))],
+                *[ConvBlock(channels, global_pooling_channels if i in global_pooling_positions else None)
+                  for i in range(start_blocks)],
                 )
         self.mid = nn.Sequential(
-                nn.Conv2d(ch + kOtherChannel, ch, 3, padding = 1),
-                *[ConvBlock(ch) for i in range(min(2, blk//2))],
+                nn.Conv2d(channels + kOtherChannel, channels, 3, padding = 1),
+                *[ConvBlock(channels, global_pooling_channels if i in global_pooling_positions else None)
+                  for i in range(start_blocks, total_blocks)],
+                nn.BatchNorm2d(channels),
+                nn.ReLU(True),
                 )
         self.pi_logits_head = nn.Sequential(
-                nn.Conv2d(ch, 28, 1),
-                nn.BatchNorm2d(28),
+                nn.Conv2d(channels, 38, 1),
+                GlobalPooling(38, 19),
+                nn.BatchNorm2d(19),
                 nn.ReLU(True),
                 nn.Flatten(2, -1),
-                LinearWithChannels(28, kH * kW, kH * kW),
-                #nn.Linear(kH * kW, kH * kW),
-                nn.Unflatten(1, (7, 4)),
+                LinearWithChannels(19, kH * kW, kH * kW),
                 )
         self.value = nn.Sequential(
-                nn.Conv2d(ch, 1, 1),
+                nn.Conv2d(channels, 1, 1),
                 nn.BatchNorm2d(1),
                 nn.Flatten(),
                 nn.ReLU(True),
@@ -128,11 +173,10 @@ class Model(nn.Module):
 
     @autocast()
     def forward(self, obs: torch.Tensor, return_categorical: bool = True):
-        batch = obs.shape[0]
         q1, q2, valid, indices = preprocess(obs)
         x = self.start(q1)
         x = self.mid(torch.cat([x, q2], 1))
-        pi = self.pi_logits_head(x).gather(1, indices).view(batch, -1)
+        pi = self.pi_logits_head(x)[indices].view(-1, 4 * kH * kW)
         value = self.value(x)
         with autocast(enabled = False):
             pi = pi.float()

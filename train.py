@@ -35,7 +35,7 @@ class Main:
 
         # #### Initialize
         # model for sampling
-        self.model = Model(c.channels, c.blocks).to(device)
+        self.model = Model(*c.model_args()).to(device)
 
         # dynamic hyperparams
         self.cur_lr = self.c.lr()
