@@ -67,7 +67,7 @@ def worker_process(remote, q_size, id):
                 action = data[j]
                 j += 1
                 r, x, y = action // 200, action // 10 % 20, action % 10
-                rewards[i] += games[i].InputPlacement(r, x, y)
+                rewards[i] += games[i].InputPlacement(r, x, y)[0]
                 if games[i].IsOver():
                     results.append((games[i].GetScore(), games[i].GetLines()))
                     rewards[i] = 0.
@@ -101,7 +101,7 @@ class Worker:
 @torch.no_grad()
 def Main(model_path):
     c = Configs()
-    model = Model(c.channels, c.blocks).to(device)
+    model = Model(*c.model_args()).to(device)
     if model_path is None:
         model_path = os.path.join(os.path.dirname(sys.argv[0]), 'models/model.pth')
     if model_path[-3:] == 'pkl': model.load_state_dict(torch.load(model_path)[0].state_dict())
