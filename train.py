@@ -98,7 +98,7 @@ class Main:
                     mini_batch = {}
                     with torch.no_grad():
                         for k, v in samples.items():
-                            mini_batch[k] = v[t_start:t_end]
+                            mini_batch[k] = v[mini_batch_indexes]
                     loss = self._calc_loss(clip_range = self.c.clipping_range,
                                         samples = mini_batch) / loss_mul
                     self.scaler.scale(loss).backward()
