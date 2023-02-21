@@ -6,15 +6,12 @@ from labml.configs import BaseConfigs, FloatDynamicHyperParam
 class Configs(BaseConfigs):
     # #### Configurations
     ## NN
-    start_blocks: int = 6
-    end_blocks: int = 2
-    channels: int = 256
-    global_pooling_channels: int = 192
-    num_global_pooling: int = 3
+    start_blocks: int = 3
+    end_blocks: int = 3
+    channels: int = 192
 
     def model_args(self):
-        return (self.start_blocks, self.end_blocks, self.channels,
-                self.global_pooling_channels, self.num_global_pooling)
+        return (self.start_blocks, self.end_blocks, self.channels)
 
     ## training
     lr: float = FloatDynamicHyperParam(1e-4, range_ = (0, 1e-3))
@@ -50,6 +47,7 @@ class Configs(BaseConfigs):
     normal_rate: float = FloatDynamicHyperParam(1.0, range_ = (0, 1))
 
     save_interval: int = 500
+
 
 def LoadConfig(with_experiment = True):
     parser = argparse.ArgumentParser()

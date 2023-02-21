@@ -27,7 +27,7 @@ def GetTorch(game):
 def GetStrat(model, game):
     with torch.no_grad():
         pi = model(GetTorch(game))[0]
-        action = torch.argmax(pi.probs, 1).item()
+        action = torch.argmax(pi, 1).item()
         return action // 200, action // 10 % 20, action % 10
 
 class GameConn(socketserver.BaseRequestHandler):
@@ -78,10 +78,10 @@ class GameConn(socketserver.BaseRequestHandler):
             with torch.no_grad():
                 states = obs_to_torch(state, device)
                 if return_value:
-                    return model(states, False)[1].tolist()
+                    return model(states)[1].tolist()
                 else:
                     k = 1 if not place_stage and microadj_delay == 61 else 3
-                    pi = model(states, False)[0]
+                    pi = model(states)[0]
                     ret = torch.topk(pi, k)[1].tolist()
                     for i, x in enumerate(ret):
                         while len(ret[i]) > 0:

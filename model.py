@@ -3,7 +3,6 @@ import torch, numpy as np
 from torch import nn
 from torch.nn import functional as F
 from torch.nn import init, Parameter
-from torch.distributions import Categorical
 from torch.cuda.amp import autocast
 
 from game import kH, kW
@@ -14,37 +13,15 @@ kBoardChannel = 1 + 15
 kOtherChannel = (kOrd - 1) + (55 - 15)
 
 
-# Global pooling in KataGo
-class GlobalPooling(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super().__init__()
-        assert out_channels < in_channels
-        pool_channels = in_channels - out_channels
-        self.out_channels = out_channels
-        self.before = nn.Sequential(
-                nn.BatchNorm2d(pool_channels),
-                nn.ReLU(True),
-                )
-        self.after = nn.Linear(2 * pool_channels, out_channels)
-
-    def forward(self, x):
-        mid = self.before(x[:,self.out_channels:])
-        pool = torch.cat([mid.mean((2, 3)), mid.amax((2, 3))], 1)
-        return self.after(pool).view(-1, self.out_channels, 1, 1) + x[:,:self.out_channels]
-
-
 class ConvBlock(nn.Module):
-    def __init__(self, channels, global_pooling_channels = None):
+    def __init__(self, channels):
         super().__init__()
-        back_channels = global_pooling_channels or channels
         self.main = nn.Sequential(
-                nn.BatchNorm2d(channels),
+                nn.Conv2d(channels, channels, 7, groups=channels, padding=3),
+                nn.LayerNorm([channels, kH, kW]),
+                nn.Conv2d(channels, channels*4, 1),
                 nn.ReLU(True),
-                nn.Conv2d(channels, channels, 3, padding = 1),
-                *([GlobalPooling(channels, back_channels)] if global_pooling_channels else []),
-                nn.BatchNorm2d(back_channels),
-                nn.ReLU(True),
-                nn.Conv2d(back_channels, channels, 3, padding = 1),
+                nn.Conv2d(channels*4, channels, 1),
                 )
 
     def forward(self, x):
@@ -91,79 +68,37 @@ class LinearWithChannels(nn.Module):
         )
 
 
-PIECE_MAP = [
-    [0,1,2,3],
-    [4,5,6,7],
-    [8,9,0,0],
-    [10,0,0,0],
-    [11,12,0,0],
-    [13,14,15,16],
-    [17,18,0,0],
-]
-
-
-def preprocess(obs: torch.Tensor):
-    batch = obs.shape[0]
-    # q1, misc1: before intermediate level
-    # q2, misc2: after intermediate level
-    q1 = torch.zeros((batch, kBoardChannel, kH, kW), dtype = torch.float32, device = obs.device)
-    q2 = torch.zeros((batch, kOtherChannel, kH, kW), dtype = torch.float32, device = obs.device)
-    misc1 = obs[:,kOrd].view(batch, -1)[:,:15]
-    misc2 = obs[:,kOrd].view(batch, -1)[:,15:55]
-    q1[:,:1] = obs[:,:1]
-    q1[:,1:] = misc1.view(batch, -1, 1, 1)
-    q2[:,:kOrd-1] = obs[:,1:kOrd]
-    q2[:,kOrd-1:] = misc2.view(batch, -1, 1, 1)
-    # for gather
-    nmap = torch.LongTensor(PIECE_MAP).to(obs.device)
-    pieces = torch.argmax(misc1[:,:7], 1)
-    indices = torch.arange(batch, device = obs.device).unsqueeze(1), nmap[pieces]
-    valid = obs[:,9:13].view(batch, -1)
-    return q1, q2, valid, indices
-
-
 class Model(nn.Module):
-    def __init__(self, start_blocks, end_blocks, channels,
-                 global_pooling_channels, num_global_pooling):
+    def __init__(self, start_blocks, end_blocks, channels):
         super().__init__()
         total_blocks = start_blocks + end_blocks
-        if num_global_pooling * total_blocks // (num_global_pooling + 1) < start_blocks:
-            global_pooling_positions = {(i * start_blocks - 1) // num_global_pooling for i in range(1, num_global_pooling)}
-            global_pooling_positions.add(start_blocks)
-        else:
-            global_pooling_positions = {(i * total_blocks - 1) // (num_global_pooling + 1) for i in range(1, num_global_pooling + 1)}
-
         self.start = nn.Sequential(
-                nn.Conv2d(kBoardChannel, channels, 5, padding = 2),
+                nn.Conv2d(kBoardChannel, channels, 5, padding=2),
                 nn.BatchNorm2d(channels),
-                nn.ReLU(True),
-                *[ConvBlock(channels, global_pooling_channels if i in global_pooling_positions else None)
-                  for i in range(start_blocks)],
+                *[ConvBlock(channels) for i in range(start_blocks)],
+                )
+        self.mid_start = nn.Sequential(
+                nn.Conv2d(kBoardChannel + kOtherChannel, channels, 5, padding=2),
+                nn.BatchNorm2d(channels),
                 )
         self.mid = nn.Sequential(
-                nn.Conv2d(channels + kOtherChannel, channels, 3, padding = 1),
-                *[ConvBlock(channels, global_pooling_channels if i in global_pooling_positions else None)
-                  for i in range(start_blocks, total_blocks)],
-                nn.BatchNorm2d(channels),
-                nn.ReLU(True),
+                *[ConvBlock(channels) for i in range(start_blocks, total_blocks)],
                 )
         self.pi_logits_head = nn.Sequential(
-                nn.Conv2d(channels, 38, 1),
-                GlobalPooling(38, 19),
-                nn.BatchNorm2d(19),
-                nn.ReLU(True),
+                nn.Conv2d(channels, 19, 1),
                 nn.Flatten(2, -1),
+                nn.ReLU(True),
                 LinearWithChannels(19, kH * kW, kH * kW),
                 )
         self.value = nn.Sequential(
-                nn.Conv2d(channels, 1, 1),
-                nn.BatchNorm2d(1),
+                nn.Conv2d(channels, 2, 1),
+                nn.LayerNorm([2, kH, kW]),
                 nn.Flatten(),
                 nn.ReLU(True),
-                nn.Linear(1 * kH * kW, 256),
+                nn.Linear(2 * kH * kW, 128),
                 nn.ReLU(True),
                 )
-        self.value_last = nn.Linear(256, 3)
+        self.value_last = nn.Linear(128, 3)
         # He initialization
         for i in [self.start, self.mid, self.pi_logits_head, self.value]:
             for layer in i:
@@ -171,21 +106,52 @@ class Model(nn.Module):
                     init.kaiming_uniform_(layer.weight, nonlinearity='relu')
         init.kaiming_uniform_(self.value_last.weight, nonlinearity='relu')
 
+    @staticmethod
+    def preprocess(obs: torch.Tensor):
+        PIECE_MAP = [
+            [0,1,2,3],
+            [4,5,6,7],
+            [8,9,0,0],
+            [10,0,0,0],
+            [11,12,0,0],
+            [13,14,15,16],
+            [17,18,0,0],
+        ]
+        batch = obs.shape[0]
+        h, w = obs.shape[2:4]
+        # q1, misc1: before intermediate level
+        # q2, misc2: after intermediate level
+        q1 = torch.zeros((batch, 1 + 15, h, w), dtype = torch.float32, device = obs.device)
+        q2 = torch.zeros((batch, (13 - 1) + (55 - 15), h, w), dtype = torch.float32, device = obs.device)
+        misc1 = obs[:,13].view(batch, -1)[:,:15]
+        misc2 = obs[:,13].view(batch, -1)[:,15:55]
+        q1[:,:1] = obs[:,:1]
+        q1[:,1:] = misc1.view(batch, -1, 1, 1)
+        q2[:,:13-1] = obs[:,1:13]
+        q2[:,13-1:] = misc2.view(batch, -1, 1, 1)
+        # for gather
+        nmap = torch.LongTensor(PIECE_MAP).to(obs.device)
+        pieces = torch.argmax(misc1[:,:7], 1)
+        indices = torch.arange(batch, device=obs.device).unsqueeze(1), nmap[pieces]
+        valid = obs[:,9:13].view(batch, -1)
+        return q1, q2, valid, indices
+
     @autocast()
-    def forward(self, obs: torch.Tensor, return_categorical: bool = True):
-        q1, q2, valid, indices = preprocess(obs)
+    def forward(self, obs: torch.Tensor):
+        h, w = obs.shape[2:4]
+        q1, q2, valid, indices = self.preprocess(obs)
         x = self.start(q1)
-        x = self.mid(torch.cat([x, q2], 1))
-        pi = self.pi_logits_head(x)[indices].view(-1, 4 * kH * kW)
+        x = self.mid_start(torch.cat([q1, q2], 1)) + x
+        x = self.mid(x)
+        pi = self.pi_logits_head(x).view(-1, h*w)[indices[0]*19 + indices[1]].view(-1, 4*h*w)
         value = self.value(x)
-        with autocast(enabled = False):
+        with torch.cuda.amp.autocast(enabled=False):
             pi = pi.float()
-            pi[valid == 0] = -math.inf
+            pi[valid == 0] = -float('inf')
             value = self.value_last(value.float()).transpose(0, 1)
             value_transform = torch.zeros_like(value)
             value_transform[:2] = value[:2]
-            value_transform[2] = F.softplus(value[2])
-            if return_categorical: pi = Categorical(logits = pi)
+            value_transform[2] = torch.nn.functional.softplus(value[2])
             return pi, value_transform
 
 

@@ -2,6 +2,7 @@ import math, traceback
 import numpy as np, torch
 from multiprocessing import shared_memory
 from torch.multiprocessing import Process, Pipe
+from torch.distributions import Categorical
 from model import Model, obs_to_torch
 from game import kTensorDim, Worker
 
@@ -98,6 +99,7 @@ class DataGenerator:
                 obs[t] = self.obs
                 # sample actions from $\pi_{\theta_{OLD}}$
                 pi, v = self.model(self.obs)
+                pi = Categorical(logits=pi)
                 values[t] = v[:2] # remove stdev
                 a = pi.sample()
                 actions[t] = a
@@ -179,7 +181,7 @@ class DataGenerator:
             last_advantage = torch.zeros((2, self.envs), dtype = torch.float32, device = self.device)
 
             # $V(s_{t+1})$
-            _, last_value = self.model(self.obs)
+            last_value = self.model(self.obs)[1]
             last_dev = last_value[2]
             last_value = last_value[:2] # remove stdev
             gammas = torch.Tensor([self.gamma, 1.0]).unsqueeze(1).to(self.device)

@@ -127,8 +127,8 @@ class Main:
     def _calc_loss(self, samples: Dict[str, torch.Tensor], clip_range: float) -> torch.Tensor:
         """## PPO Loss"""
         # Sampled observations are fed into the model to get $\pi_\theta(a_t|s_t)$ and $V^{\pi_\theta}(s_t)$;
-        pi_val, value = self.model(samples['obs'], False)
-        pi = Categorical(logits = pi_val)
+        pi, value = self.model(samples['obs'])
+        pi = Categorical(logits=pi)
         raw_dist = Normal(value[1], value[2])
         value = value[0]
 

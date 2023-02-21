@@ -143,7 +143,7 @@ def Main(model_path):
         st.update(map(lambda x: x.tobytes(), states_num))
         #print(len(st), file=of, flush=True)
 
-        pi = model(states, False)[0]
+        pi = model(states)[0]
         pi = torch.argmax(pi, 1)
 
         j = 0

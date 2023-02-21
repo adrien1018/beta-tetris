@@ -42,10 +42,10 @@ def Main(model_path):
         with torch.no_grad():
             states = obs_to_torch(state, device)
             if return_value:
-                return model(states, False)[1].tolist()
+                return model(states)[1].tolist()
             else:
                 k = 1 if not place_stage and microadj_delay == 61 else 3
-                pi = model(states, False)[0]
+                pi = model(states)[0]
                 ret = torch.topk(pi, k)[1].tolist()
                 for i, x in enumerate(ret):
                     while len(ret[i]) > 0:
@@ -69,11 +69,11 @@ def Main(model_path):
         while game.GetLines() < search_limit:
             x = game.Search(SearchCallback, first_gain)
             if x is None: break
-            # s = torch.argmax(model(obs_to_torch(game.GetState(), device).unsqueeze(0), False)[0], 1).item()
+            # s = torch.argmax(model(obs_to_torch(game.GetState(), device).unsqueeze(0))[0], 1).item()
             # game.InputPlacement(s // 200, s // 10 % 20, s % 10)
             # if game.IsOver(): break
         while not game.IsOver():
-            s = torch.argmax(model(obs_to_torch(game.GetState(), device).unsqueeze(0), False)[0], 1).item()
+            s = torch.argmax(model(obs_to_torch(game.GetState(), device).unsqueeze(0))[0], 1).item()
             game.InputPlacement(s // 200, s // 10 % 20, s % 10)
         results.append((game.GetScore(), game.GetLines()))
         print(game.GetScore(), file=sys.stderr)

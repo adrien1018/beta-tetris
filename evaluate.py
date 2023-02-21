@@ -50,7 +50,7 @@ def Main(model_path):
     while len(results) < n:
         states = [i.GetState() for i, j in zip(games, is_running) if j]
         states = obs_to_torch(np.stack(states), device)
-        pi = model(states, False)[0]
+        pi = model(states)[0]
         pi = torch.argmax(pi, 1)
         j = 0
         for i in range(batch_size):
