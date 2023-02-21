@@ -1,4 +1,4 @@
-import hashlib, traceback, sys, os, random
+import hashlib, traceback
 import numpy as np, torch
 from multiprocessing import shared_memory
 from torch.multiprocessing import Process, Pipe
@@ -43,11 +43,6 @@ class Game:
         return self.env.GetState()
 
 def worker_process(remote, name: str, shms: list, idx: slice, seed: int):
-    if idx.start == 0 and name:
-        fp = open('logs/{}/{}'.format(name, os.getpid()), 'w')
-        os.dup2(fp.fileno(), 1)
-        save = True
-    else: save = False
     shms = [(shared_memory.SharedMemory(name), shape, typ) for name, shape, typ in shms]
     shm_obs, shm_reward, shm_over = [
             np.ndarray(shape, dtype = typ, buffer = shm.buf) for shm, shape, typ in shms]
@@ -57,20 +52,14 @@ def worker_process(remote, name: str, shms: list, idx: slice, seed: int):
         int.to_bytes(seed, 4, 'little') + int.to_bytes(x, 4, 'little')).digest(), 'little')
     games = [Game(Seed(i)) for i in range(num)]
     # wait for instructions from the connection and execute them
-    rands = [random.random() for i in range(num)]
     try:
         while True:
             cmd, data = remote.recv()
             if cmd == "step":
-                step, data, gb = data
+                step, data, epoch = data
                 result = []
                 for i in range(num):
-                    if save and random.random() < 0.005:
-                        print(gb, end=' ', flush=True)
-                        games[i].env.PrintTetrisCol()
                     result.append(games[i].step(data[i]))
-                    if result[-1][3] is not None:
-                        rands[i] = random.random()
                 obs, reward, over, info = zip(*result)
                 shm_obs[idx] = np.stack(obs)
                 shm_reward[idx,step] = np.array(reward)
@@ -88,6 +77,9 @@ def worker_process(remote, name: str, shms: list, idx: slice, seed: int):
             elif cmd == "set_param":
                 for i in games:
                     i.reset_params = data
+            elif cmd == "get_stats":
+                epoch = data
+                remote.send(games[0].env.GetClearCol())
             else:
                 raise NotImplementedError
     except:

@@ -1321,16 +1321,6 @@ public:
     printf("\nprvmis %.1f\n", misc[54]);
     fflush(stdout);
   }
-
-  void PrintTetrisCol() const {
-    static constexpr char kNames[][7] = {"Single", "Double", "Triple", "Tetris"};
-    for (int k = 0; k < 4; k++) {
-      printf("%s", kNames[k]);
-      for (int i = 0; i < 10; i++) printf(" %lu", clear_col_count[k][i]);
-      printf("%c", " \n"[k==3]);
-    }
-    fflush(stdout);
-  }
 #endif
 };
 
@@ -1889,9 +1879,11 @@ static PyObject* Tetris_PrintAllState(Tetris* self, PyObject* Py_UNUSED(ignored)
   Py_RETURN_NONE;
 }
 
-static PyObject* Tetris_PrintTetrisCol(Tetris* self, PyObject* Py_UNUSED(ignored)) {
-  self->PrintTetrisCol();
-  Py_RETURN_NONE;
+static PyObject* Tetris_GetClearCol(Tetris* self, PyObject* Py_UNUSED(ignored)) {
+  npy_intp dims[] = {4, Tetris::kM};
+  PyObject* ret = PyArray_SimpleNew(2, dims, NPY_UINT64);
+  memcpy(PyArray_DATA((PyArrayObject*)ret), clear_col_count, sizeof(clear_col_count));
+  return ret;
 }
 
 #endif
@@ -1932,8 +1924,8 @@ static PyMethodDef py_tetris_methods[] = {
      "Print current field"},
     {"PrintAllState", (PyCFunction)Tetris_PrintAllState, METH_NOARGS,
      "Print all internal state"},
-    {"PrintTetrisCol", (PyCFunction)Tetris_PrintTetrisCol, METH_NOARGS,
-     "Print tetris column stats"},
+    {"GetClearCol", (PyCFunction)Tetris_GetClearCol, METH_NOARGS,
+     "Print line clear column stats"},
 #endif
     {nullptr}};
 

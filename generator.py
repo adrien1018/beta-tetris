@@ -38,22 +38,35 @@ class DataGenerator:
 
         self.set_params(game_params)
         self.obs = obs_to_torch(self.obs_np, self.device)
+        self.logfile = open('logs/{}/logs'.format(name), 'a')
 
     def w_range(self, x): return slice(x * self.env_per_worker, (x + 1) * self.env_per_worker)
 
-    def update_model(self, state_dict):
+    def update_model(self, state_dict, epoch = 0):
         target_device = next(self.model.parameters()).device
         for i in state_dict:
             if state_dict[i].device != target_device:
                 state_dict[i] = state_dict[i].to(target_device)
         self.model.load_state_dict(state_dict)
 
+        stats = np.zeros((4, 10), dtype='uint64')
+        for i in self.workers:
+            i.child.send(('get_stats', epoch))
+            stats += i.child.recv()
+        names = ['SGL', 'DBL', 'TRP', 'TET']
+        print(epoch, end='', file=self.logfile)
+        for i in range(4):
+            print(' ' + names[i], end='', file=self.logfile)
+            for j in stats[i]:
+                print(' ' + str(j), end='', file=self.logfile)
+        print(file=self.logfile, flush=True)
+
     def set_params(self, game_params):
         for i in self.workers:
             i.child.send(('set_param', game_params[:-2]))
         self.gamma, self.lamda = game_params[-2:]
 
-    def sample(self, train = True, gpu = False, step = 0):
+    def sample(self, train = True, gpu = False, epoch = 0):
         """### Sample data with current policy"""
         actions = torch.zeros((self.worker_steps, self.envs), dtype = torch.int32, device = self.device)
         obs = torch.zeros((self.worker_steps, self.envs, *kTensorDim), dtype = torch.float32, device = self.device)
@@ -94,7 +107,7 @@ class DataGenerator:
             # run sampled actions on each worker
             # workers will place results in self.obs_np,rewards,done
             for w, worker in enumerate(self.workers):
-                worker.child.send(('step', (t, actions_cpu[self.w_range(w)], step)))
+                worker.child.send(('step', (t, actions_cpu[self.w_range(w)], epoch)))
             for i in self.workers:
                 info_arr = i.child.recv()
                 # collect episode info, which is available if an episode finished
@@ -209,11 +222,11 @@ def generator_process(remote, name, model_args, *args):
         while True:
             cmd, data = remote.recv()
             if cmd == "update_model":
-                generator.update_model(data)
+                generator.update_model(data[0], data[1])
             elif cmd == "set_param":
                 generator.set_params(data)
             elif cmd == "start_generate":
-                samples = generator.sample(step = data)
+                samples = generator.sample(epoch = data)
             elif cmd == "get_data":
                 remote.send(samples)
                 samples = None
@@ -235,16 +248,16 @@ class GeneratorProcess:
         self.process = ctx.Process(target = generator_process,
                 args = (parent, name, c.model_args(), c.n_workers, c.env_per_worker, c.worker_steps, game_params))
         self.process.start()
-        self.SendModel(model)
+        self.SendModel(model, -1)
 
-    def SendModel(self, model):
+    def SendModel(self, model, epoch):
         state_dict = model.state_dict()
         for i in state_dict:
             state_dict[i] = state_dict[i].cpu()
-        self.child.send(('update_model', state_dict))
+        self.child.send(('update_model', (state_dict, epoch)))
 
-    def StartGenerate(self, step):
-        self.child.send(('start_generate', step))
+    def StartGenerate(self, epoch):
+        self.child.send(('start_generate', epoch))
 
     def SetParams(self, game_params):
         self.child.send(('set_param', game_params))

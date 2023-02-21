@@ -13,6 +13,7 @@ from torch.cuda.amp import autocast, GradScaler
 import labml.lab
 from labml import monit, tracker, logger, experiment
 from labml.configs import FloatDynamicHyperParam
+from labml.utils.pytorch import store_model_indicators
 
 from game import kTensorDim
 from generator import GeneratorProcess
@@ -184,28 +185,28 @@ class Main:
         offset = tracker.get_global_step()
         if offset > 100:
             # If resumed, sample several iterations first to reduce sampling bias
-            self.generator.SendModel(self.model)
+            self.generator.SendModel(self.model, offset)
             for i in range(16): self.generator.StartGenerate(offset)
             tracker.save() # increment step
         else:
             self.generator.StartGenerate(offset)
         for _ in monit.loop(self.c.updates - offset):
-            update = tracker.get_global_step()
+            epoch = tracker.get_global_step()
             # sample with current policy
             samples, info = self.generator.GetData()
-            self.generator.StartGenerate(update)
+            self.generator.StartGenerate(epoch)
             tracker.add(info)
             # train the model
             self.train(samples)
-            self.generator.SendModel(self.model)
+            self.generator.SendModel(self.model, epoch)
             # write summary info to the writer, and log to the screen
             tracker.save()
-            if (update + 1) % 2 == 0:
-                self.set_optim(self.c.lr(), self.c.reg_l2())
-                self.set_game_params(self.get_game_params())
-                self.set_weight_param(self.c.entropy_weight(), self.c.raw_weight())
-            if (update + 1) % 25 == 0: logger.log()
-            if (update + 1) % self.c.save_interval == 0: experiment.save_checkpoint()
+            # update hyperparams
+            self.set_optim(self.c.lr(), self.c.reg_l2())
+            self.set_game_params(self.get_game_params())
+            self.set_weight_param(self.c.entropy_weight(), self.c.raw_weight())
+            if (epoch + 1) % 25 == 0: logger.log()
+            if (epoch + 1) % self.c.save_interval == 0: experiment.save_checkpoint()
 
 
 def claim_experiment(uuid: str):
