@@ -75,17 +75,20 @@ class Model(nn.Module):
         self.start = nn.Sequential(
                 nn.Conv2d(kBoardChannel, channels, 5, padding=2),
                 nn.BatchNorm2d(channels),
+                nn.ReLU(True),
                 *[ConvBlock(channels) for i in range(start_blocks)],
                 )
         self.mid_start = nn.Sequential(
                 nn.Conv2d(kBoardChannel + kOtherChannel, channels, 5, padding=2),
                 nn.BatchNorm2d(channels),
+                nn.ReLU(True),
                 )
         self.mid = nn.Sequential(
                 *[ConvBlock(channels) for i in range(start_blocks, total_blocks)],
                 )
         self.pi_logits_head = nn.Sequential(
                 nn.Conv2d(channels, 19, 1),
+                nn.LayerNorm([19, kH, kW]),
                 nn.Flatten(2, -1),
                 nn.ReLU(True),
                 LinearWithChannels(19, kH * kW, kH * kW),
