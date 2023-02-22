@@ -164,14 +164,16 @@ class Tetris {
   double step_reward_ = 5e-4;
   int target_column_ = -1;
   bool target_column_lock_ = false;
+  int prev_target_column_change_ = 0;
 
   // For random state balancing
   int current_state_steps_ = 1000;
   double steps_exp_avg_ = 40.;
 
-  void SetTargetColumn_() {
-    if (target_column_lock_) return;
-    target_column_ = std::uniform_int_distribution<int>(-5, 15)(rng_);
+  void SetTargetColumn_(bool force = false) {
+    if (!force && target_column_lock_) return;
+    prev_target_column_change_ = lines_;
+    target_column_ = std::uniform_int_distribution<int>(-3, 14)(rng_);
     if (target_column_ > 9) target_column_ = 9;
     if (target_column_ < -1) target_column_ = -1;
   }
@@ -709,7 +711,9 @@ class Tetris {
     if (real_lines >= 2 && pos.y == target_column_) {
       score_reward *= real_lines * 0.75;
     }
-    if (real_lines && std::uniform_int_distribution<int>(0, 9)(rng_) == 0) {
+    if (!target_column_lock_ &&
+        lines_ + real_lines - prev_target_column_change_ >= 16 &&
+        std::uniform_int_distribution<int>(0, 5)(rng_) == 0) {
       SetTargetColumn_();
     }
     if (pos.x >= 18) score_reward *= 1 + kBottomGain_;
@@ -803,7 +807,7 @@ class Tetris {
       // don't change mode if steps not enough to ensure correct data distribution
       ResetGame(start_level_, hz_avg_, hz_dev_, microadj_delay_, start_lines_,
                 drought_mode_, int(step_reward_ / (kRewardMultiplier_ * 0.5) + 5) / 10 * 10,
-                penalty_multiplier);
+                penalty_multiplier, target_column_lock_ ? target_column_ : -2);
       return;
     }
     current_state_steps_ = 0;
@@ -821,6 +825,8 @@ class Tetris {
     double step_points = step_points_table[std::discrete_distribution<int>({1, reward_ratio, std::pow(reward_ratio, 1.5)})(rng_)];
     int start_lines = 0;
     bool drought_mode = IntRand(0, 2)(rng_) == 0;
+    int target_column = (SetTargetColumn_(true), target_column_);
+    if (IntRand(0, 2)(rng_) == 0) target_column = -2;
     if (IntRand(0, 1)(rng_)) {
       hz_avg = IntRand(0, 1)(rng_) ? 12 : 20;
       microadj_delay = 21;
@@ -845,7 +851,7 @@ class Tetris {
       }
     }*/
     ResetGame(start_level, hz_avg, hz_dev, microadj_delay, start_lines,
-              drought_mode, step_points, penalty_multiplier);
+              drought_mode, step_points, penalty_multiplier, target_column);
   }
 
   static int PlaceField(Field& field, int piece, const Position& pos) {
