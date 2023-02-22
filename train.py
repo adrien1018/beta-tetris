@@ -41,9 +41,8 @@ class Main:
         # dynamic hyperparams
         self.cur_lr = self.c.lr()
         self.cur_reg_l2 = self.c.reg_l2()
-        self.cur_game_params = (0., 0., 0., 0., 0., 0., 0.)
-        self.cur_entropy_weight = self.c.entropy_weight()
-        self.cur_raw_weight = self.c.raw_weight()
+        self.cur_game_params = (0., 0., 0., 0., 0.)
+        self.set_weight_params()
 
         # optimizer
         self.scaler = GradScaler()
@@ -56,8 +55,8 @@ class Main:
         self.set_game_params(cur_params)
 
     def get_game_params(self):
-        return (self.c.pre_trans(), self.c.left_deduct(), self.c.neg_mul(), self.c.reward_ratio(),
-                self.c.normal_rate(), self.c.gamma(), self.c.lamda())
+        return (self.c.pre_trans(), self.c.neg_mul(), self.c.reward_ratio(),
+                self.c.gamma(), self.c.lamda())
 
     def set_optim(self, lr, reg_l2):
         if lr == self.cur_lr and reg_l2 == self.cur_reg_l2: return
@@ -72,9 +71,10 @@ class Main:
         self.generator.SetParams(game_params)
         self.cur_game_params = game_params
 
-    def set_weight_param(self, entropy, raw):
-        self.cur_entropy_weight = entropy
-        self.cur_raw_weight = raw
+    def set_weight_params(self):
+        self.cur_entropy_weight = self.c.entropy_weight()
+        self.cur_raw_weight = self.c.raw_weight()
+        self.cur_vf_weight = self.c.vf_weight()
 
     def destroy(self):
         self.generator.Close()
@@ -166,7 +166,7 @@ class Main:
 
         # we want to maximize $\mathcal{L}^{CLIP+VF+EB}(\theta)$
         # so we take the negative of it as the loss
-        loss = -(policy_reward - self.c.vf_weight * vf_loss - self.cur_raw_weight * raw_loss + \
+        loss = -(policy_reward - self.cur_vf_weight * vf_loss - self.cur_raw_weight * raw_loss + \
                 self.cur_entropy_weight * entropy_bonus)
 
         # for monitoring
@@ -204,7 +204,7 @@ class Main:
             # update hyperparams
             self.set_optim(self.c.lr(), self.c.reg_l2())
             self.set_game_params(self.get_game_params())
-            self.set_weight_param(self.c.entropy_weight(), self.c.raw_weight())
+            self.set_weight_params()
             if (epoch + 1) % 25 == 0: logger.log()
             if (epoch + 1) % self.c.save_interval == 0: experiment.save_checkpoint()
 

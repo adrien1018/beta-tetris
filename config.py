@@ -34,17 +34,15 @@ class Configs(BaseConfigs):
 
     ## loss calculation
     clipping_range: float = 0.2
-    vf_weight: float = 0.5
+    vf_weight: float = FloatDynamicHyperParam(0.5, range_ = (0, 1))
     raw_weight: float = FloatDynamicHyperParam(3e-4, range_ = (0, 0.1))
     entropy_weight: float = FloatDynamicHyperParam(2.2e-2, range_ = (0, 5e-2))
     reg_l2: float = FloatDynamicHyperParam(0., range_ = (0, 5e-5))
 
     # game initialization
     pre_trans: float = FloatDynamicHyperParam(0.7, range_ = (0, 1))
-    left_deduct: float = FloatDynamicHyperParam(0.0, range_ = (0, 1))
     neg_mul: float = FloatDynamicHyperParam(0.0, range_ = (0, 1))
     reward_ratio: float = FloatDynamicHyperParam(0.2, range_ = (0, 1))
-    normal_rate: float = FloatDynamicHyperParam(1.0, range_ = (0, 1))
 
     save_interval: int = 500
 

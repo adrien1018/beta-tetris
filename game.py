@@ -12,8 +12,8 @@ class Game:
     def __init__(self, seed: int):
         self.args = (0, False)
         self.env = tetris.Tetris(seed)
-        # pre_trans, left_deduct, penalty_multiplier, reward_ratio, normal_rate
-        self.reset_params = (1., 0., 0., 1., 1.)
+        # pre_trans, penalty_multiplier, reward_ratio
+        self.reset_params = (1., 0., 1.)
         self.reset()
 
     def step(self, action):

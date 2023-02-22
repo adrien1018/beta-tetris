@@ -28,10 +28,6 @@
 uint64_t clear_col_count[4][10] = {};
 #endif
 
-#if defined(MIRROR_PIECES) + defined(MIRROR_PIECES_SAME_ROTATION) + defined(MIRROR_PIECES_COMPAT) > 1
-#error "Only one of MIRROR_PIECES, MIRROR_PIECES_SAME_ROTATION and MIRROR_PIECES_COMPAT can be specified"
-#endif
-
 class Tetris {
  public:
   PyObject_HEAD
@@ -64,21 +60,9 @@ class Tetris {
       return rotate == pos.rotate && x == pos.x && y == pos.y;
     }
     bool operator!=(const Position& pos) const { return !(*this == pos); }
-#ifdef MIRROR_PIECES_COMPAT
-    Position Adjust(int piece) const {
-      if ((piece == 2 || piece == 4) && rotate == 1) return {rotate, x, y + 1};
-      if (piece == 6 && rotate == 0) return {rotate, x, y - 1};
-      return *this;
-    }
-    Position RevAdjust(int piece) const {
-      if ((piece == 2 || piece == 4) && rotate == 1) return {rotate, x, y - 1};
-      if (piece == 6 && rotate == 0) return {rotate, x, y + 1};
-      return *this;
-    }
-#endif
   };
 
-  using State = std::array<std::array<std::array<float, kM>, kN>, 14>;
+  using State = std::array<std::array<std::array<float, kM>, kN>, 15>;
 
  private:
   // # RNG
@@ -89,16 +73,6 @@ class Tetris {
   // # Game constants
   // Piece generation probabilities
   static constexpr int kTransitionProb_[kT][kT] = {
-#ifdef MIRROR_RNG
-  // T  J  Z  O  S  L  I (next)
-    {1, 5, 5, 5, 6, 5, 5}, // T (current)
-    {6, 1, 5, 5, 5, 5, 5}, // J
-    {5, 5, 2, 5, 5, 5, 5}, // Z
-    {5, 5, 5, 2, 5, 5, 5}, // O
-    {5, 5, 5, 5, 1, 6, 5}, // S
-    {6, 5, 5, 5, 5, 1, 5}, // L
-    {5, 5, 6, 5, 5, 5, 1}, // I
-#else
   // T  J  Z  O  S  L  I (next)
     {1, 5, 6, 5, 5, 5, 5}, // T (current)
     {6, 1, 5, 5, 5, 5, 5}, // J
@@ -107,19 +81,8 @@ class Tetris {
     {5, 5, 5, 5, 2, 5, 5}, // S
     {6, 5, 5, 5, 5, 1, 5}, // L
     {5, 5, 5, 5, 6, 5, 1}, // I
-#endif
   };
   static constexpr int kTransitionProbDrought_[kT][kT] = {
-#ifdef MIRROR_RNG
-  // T  J  Z  O  S  L  I (next)
-    { 3,11,11,11,14,11, 3}, // T (current)
-    {14, 3,11,11,11,11, 3}, // J
-    {11,11, 6,11,11,11, 3}, // Z
-    {11,11,11, 6,11,11, 3}, // O
-    {11,11,11,11, 3,14, 3}, // S
-    {14,11,11,11,11, 3, 3}, // L
-    {10,10,12,10,10,10, 2}, // I
-#else
   // T  J  Z  O  S  L  I (next)
     { 3,11,14,11,11,11, 3}, // T (current)
     {14, 3,11,11,11,11, 3}, // J
@@ -128,7 +91,6 @@ class Tetris {
     {11,11,11,11, 6,11, 3}, // S
     {14,11,11,11,11, 3, 3}, // L
     {10,10,10,10,12,10, 2}, // I
-#endif
   };
   // Tetraminos
   using Poly_ = std::array<std::pair<int, int>, 4>;
@@ -152,13 +114,7 @@ class Tetris {
   static constexpr int kLineClearDelay_ = 20;
   // 1000 / (30 * 525 / 1.001 * 455 / 2 / 2 / (341 * 262 - 0.5) * 3)
   static constexpr double kFrameLength_ = 655171. / 39375;
-#if defined(MIRROR_PIECES) || defined(MIRROR_PIECES_SAME_ROTATION) || defined(MIRROR_PIECES_COMPAT)
-  static constexpr Position kStartPositionAbnorm_ = {0, 0, 5}; // (r, x, y)
-  static constexpr Position kStartPositionNorm_ = {0, 0, 4}; // (r, x, y)
-#else
-  static constexpr Position kStartPositionAbnorm_ = {0, 0, 3}; // (r, x, y)
-  static constexpr Position kStartPositionNorm_ = {0, 0, 5}; // (r, x, y)
-#endif
+  static constexpr Position kStartPosition_ = {0, 0, 5}; // (r, x, y)
 
   // # Game state
   int start_level_, lines_, score_, pieces_;
@@ -199,8 +155,6 @@ class Tetris {
   // Provide a small reward deduction each time the agent makes an misdrop;
   //   this can guide the agent to avoid high-risk movements
   static constexpr double kBottomGain_ = 0.1;
-  // Provide a reward difference to guide the agent to use right well strategy.
-  double left_deduct_ = 0.2;
   // Provide a reward gain for bottom row scoring to guide the agent to not
   //   score dirty tetrises.
   // This can be decreased during training.
@@ -208,18 +162,14 @@ class Tetris {
   // Multiplier of misdrop & infeasible penalty. Set to 0 in early training to
   //   avoid misguiding the agent.
   double step_reward_ = 5e-4;
+  int target_column_ = -1;
+  bool target_column_lock_ = false;
 
-  // setting this to lower than 1 will make piece starting at abnormal position ((0,4) instead of (0.5)) sometimes
-  // to check if the left-well tendency is due to the asymmetry of starting point
-  double start_normal_rate_ = 1.0;
-  Position current_start_position_ = kStartPositionNorm_;
-
-  void SetStartPosition_() {
-    if (std::uniform_real_distribution<double>(0, 1)(rng_) < start_normal_rate_) {
-      current_start_position_ = kStartPositionNorm_;
-    } else {
-      current_start_position_ = kStartPositionAbnorm_;
-    }
+  void SetTargetColumn_() {
+    if (target_column_lock_) return;
+    target_column_ = std::uniform_int_distribution<int>(-5, 15)(rng_);
+    if (target_column_ > 9) target_column_ = 9;
+    if (target_column_ < -1) target_column_ = -1;
   }
 
   void SpawnPiece_() {
@@ -268,11 +218,7 @@ class Tetris {
         for (int y = 0; y < kM; y++) {
           bool flag = true;
           for (int i = 0; i < 4; i++) {
-#ifdef MIRROR_PIECES
-            int nx = pl[i].first + x, ny = -pl[i].second + y;
-#else
             int nx = pl[i].first + x, ny = pl[i].second + y;
-#endif
             if (ny < 0 || nx >= kN || ny >= kM || (nx >= 0 && field[nx][ny])) {
               flag = false;
               break;
@@ -500,7 +446,7 @@ class Tetris {
   void StoreMap_(bool use_temp) {
     stored_mp_ = use_temp ? GetMap_(temp_field_, next_piece_)
                           : GetMap_(field_, now_piece_);
-    stored_mp_lb_ = Dijkstra_(stored_mp_, current_start_position_);
+    stored_mp_lb_ = Dijkstra_(stored_mp_, kStartPosition_);
   }
 
   static std::vector<int> GetInputWindow_(const MoveSequence& seq,
@@ -598,7 +544,7 @@ class Tetris {
   }
 
   Position Simulate_(const Map_& mp, const FrameSequence& seq, int frames_per_drop, bool finish = true) {
-    Position now = current_start_position_;
+    Position now = kStartPosition_;
     int R = mp.size();
     for (size_t i = 0; i < seq.seq.size(); i++) {
       auto& input = seq.seq[i];
@@ -648,7 +594,7 @@ class Tetris {
 
   // needed: StoreMap_(true) (stored_mp_, stored_mp_lb_), temp_lines_
   double SetPlannedPlacement_(const Position& pos) {
-    MoveSequence seq = GetMoveSequence_(stored_mp_, stored_mp_lb_, current_start_position_, pos);
+    MoveSequence seq = GetMoveSequence_(stored_mp_, stored_mp_lb_, kStartPosition_, pos);
     planned_placement_ = pos;
     planned_seq_ = seq;
     int frames_per_drop = GetFramesPerDrop_(GetLevel_(start_level_, temp_lines_));
@@ -692,7 +638,7 @@ class Tetris {
       prev_misdrop_ = false;
       prev_micro_ = false;
       MoveSequence cur_seq =
-          GetMoveSequence_(stored_mp_, stored_mp_lb_, current_start_position_, pos);
+          GetMoveSequence_(stored_mp_, stored_mp_lb_, kStartPosition_, pos);
       real_fseq_ = SequenceToFrame_(cur_seq, hz_avg_, frames_per_drop);
     } else {
       if (!real_placement_set_) throw 1; // TODO
@@ -702,7 +648,7 @@ class Tetris {
       bool flag = false;
       if (pos == planned_placement_) {
         MoveSequence cur_seq =
-            GetMoveSequence_(stored_mp_, stored_mp_lb_, current_start_position_, pos);
+            GetMoveSequence_(stored_mp_, stored_mp_lb_, kStartPosition_, pos);
         if (SequenceEquivalent_(cur_seq, planned_seq_)) { // no micro
           fseq = SequenceToFrame_(cur_seq, hz, frames_per_drop);
           flag = true;
@@ -756,13 +702,17 @@ class Tetris {
     pieces_++;
     double orig_score_reward = kRewardMultiplier_ * score_delta;
     double score_reward = orig_score_reward;
-    if (pos.y == 0 && real_lines > 2) score_reward *= 1 - left_deduct_;
+    if (real_lines >= 2 && pos.y == target_column_) {
+      score_reward *= real_lines * 0.75;
+    }
+    if (real_lines && std::uniform_int_distribution<int>(0, 9)(rng_) == 0) {
+      SetTargetColumn_();
+    }
     if (pos.x >= 18) score_reward *= 1 + kBottomGain_;
     reward += score_reward + step_reward_;
     real_placement_set_ = false;
     place_stage_ = true;
     consecutive_invalid_ = 0;
-    if (std::uniform_int_distribution<int>(0, 5)(rng_) == 0) SetStartPosition_();
     StoreMap_(true);
     game_over_ = MapEmpty_(stored_mp_lb_);
     return {reward, orig_score_reward};
@@ -808,8 +758,7 @@ class Tetris {
 
   void ResetGame(int start_level = 18, double hz_avg = 12, double hz_dev = 0,
                  int microadj_delay = 40, int start_lines = 0, bool drought_mode = false,
-                 double step_points = 0, double left_deduct = 0.2,
-                 double penalty_multiplier = 1.0, double normal_rate = 1.0) {
+                 double step_points = 0, double penalty_multiplier = 1.0, int target_column = -2) {
     start_level_ = start_level;
     lines_ = start_lines;
     start_lines_ = start_lines;
@@ -823,7 +772,6 @@ class Tetris {
     for (auto& i : field_) std::fill(i.begin(), i.end(), false);
     drought_mode_ = drought_mode;
     step_reward_ = step_points * kRewardMultiplier_ * 0.5;
-    left_deduct_ = left_deduct;
     penalty_multiplier_ = penalty_multiplier;
     hz_avg_ = hz_avg;
     hz_dev_ = hz_dev;
@@ -836,12 +784,13 @@ class Tetris {
     real_placement_set_ = false;
     tetris_count_ = 0;
     right_tetris_count_ = 0;
-    start_normal_rate_ = normal_rate;
-    SetStartPosition_();
+    target_column_ = target_column_;
+    target_column_lock_ = target_column_ != -2;
+    SetTargetColumn_();
     StoreMap_(false);
   }
 
-  void ResetRandom(float pre_trans, double left_deduct, double penalty_multiplier, double reward_ratio, double normal_rate) {
+  void ResetRandom(float pre_trans, double penalty_multiplier, double reward_ratio) {
     using IntRand = std::uniform_int_distribution<int>;
     using RealRand = std::uniform_real_distribution<float>;
     constexpr double hz_table[] = {12, 13.5, 15, 20, 30};
@@ -851,11 +800,13 @@ class Tetris {
     int hz_ind = IntRand(0, 4)(rng_);
     int start_level = start_level_table[IntRand(0, 2)(rng_)];
     double hz_avg = hz_table[hz_ind];
-    double hz_dev = 0; // IntRand(0, 2)(rng_) ? 0 : 1;
+    double hz_dev = hz_avg >= 29 || IntRand(0, 2)(rng_) ? 0 : int(hz_avg) / 6 * 0.5;
     int microadj_delay = adj_delay_table[IntRand(0, 4)(rng_)];
     double step_points = step_points_table[std::discrete_distribution<int>({1, reward_ratio, std::pow(reward_ratio, 1.5)})(rng_)];
     int start_lines = 0;
     bool drought_mode = IntRand(0, 2)(rng_) == 0;
+    // 29-start will be very short when hz<15, resulting in imbalanced traning data
+    if (hz_avg < 15 && IntRand(0, 2)(rng_)) start_level = 29;
     if (IntRand(0, 1)(rng_)) {
       hz_avg = IntRand(0, 1)(rng_) ? 12 : 20;
       microadj_delay = 21;
@@ -880,17 +831,13 @@ class Tetris {
       }
     }*/
     ResetGame(start_level, hz_avg, hz_dev, microadj_delay, start_lines,
-              drought_mode, step_points, left_deduct, penalty_multiplier, normal_rate);
+              drought_mode, step_points, penalty_multiplier);
   }
 
   static int PlaceField(Field& field, int piece, const Position& pos) {
     auto& pl = kBlocks_[piece][pos.rotate];
     for (auto& i : pl) {
-#ifdef MIRROR_PIECES
-      int nx = pos.x + i.first, ny = pos.y - i.second;
-#else
       int nx = pos.x + i.first, ny = pos.y + i.second;
-#endif
       if (nx >= kN || ny >= kM || nx < 0 || ny < 0) continue;
       field[nx][ny] = true;
     }
@@ -929,12 +876,9 @@ class Tetris {
     // 1-4: planned_placement_ (place_stage_ = true: step 1's input)
     // 5-8: planned_placement_ (place_stage_ = false)
     // 9-12: possible placements
-    // 13: misc
-#ifdef MIRROR_PIECES_COMPAT
-    auto planned_placement = planned_placement_.RevAdjust(place_stage_ ? now_piece_ : next_piece_);
-#else
+    // 13: column
+    // 14: misc
     auto& planned_placement = planned_placement_;
-#endif
     if (place_stage_) {
       for (int i = 0; i < kN; i++) {
         for (int j = 0; j < kM; j++) ret[0][i][j] = 1 - temp_field_[i][j];
@@ -958,26 +902,12 @@ class Tetris {
         }
       }
     }
-    int cur_piece = place_stage_ ? next_piece_ : now_piece_;
-#ifdef MIRROR_PIECES_COMPAT
-    if (cur_piece == 2 || cur_piece == 4) {
-      for (int i = 0; i < kN; i++) {
-        for (int j = 0; j < kM - 1; j++) {
-          ret[9 + 1][i][j] = ret[9 + 1][i][j + 1];
-        }
-        ret[9 + 1][i][kM - 1] = 0;
-      }
-    } else if (cur_piece == 6) {
-      for (int i = 0; i < kN; i++) {
-        for (int j = kM - 1; j > 0; j--) {
-          ret[9 + 0][i][j] = ret[9 + 0][i][j - 1];
-        }
-        ret[9 + 0][i][0] = 0;
-      }
+    if (target_column_ >= 0) {
+      for (int i = 0; i < kN; i++) ret[13][i][target_column_] = 1;
     }
-#endif
+    int cur_piece = place_stage_ ? next_piece_ : now_piece_;
     // misc
-    float* misc = (float*)ret[13].data();
+    float* misc = (float*)ret[14].data();
     // 0-6: current
     misc[0 + cur_piece] = 1;
     // 7-14: next / 7(if place_stage_)
@@ -1053,7 +983,7 @@ class Tetris {
     }
     // 54: prev_misdrop
     misc[54] = !place_stage_ && prev_misdrop_;
-    // 13 + 55 = 68 (channels)
+    // 14 + 55 = 69 (channels)
     return ret;
   }
 
@@ -1078,11 +1008,7 @@ class Tetris {
   std::pair<double, double> InputPlacement(const Position& pos, bool training = true) {
     if (game_over_) return {0, 0};
     bool orig_stage = place_stage_;
-#ifdef MIRROR_PIECES_COMPAT
-    auto npos = pos.Adjust(orig_stage ? next_piece_ : now_piece_);
-#else
     auto& npos = pos;
-#endif
     if (npos.rotate >= (int)stored_mp_lb_.size() || npos.x >= kN || npos.y >= kM) {
       return {kInvalidReward_, 0};
     }
@@ -1121,11 +1047,7 @@ class Tetris {
   void SetNextPiece(int piece) { next_piece_ = piece; }
 
   bool SetPreviousPlacement(const Position& pos) {
-#ifdef MIRROR_PIECES_COMPAT
-    return SetRealPlacement_(pos.Adjust(now_piece_));
-#else
     return SetRealPlacement_(pos);
-#endif
   }
 
   // Set a particular board; the next step will be step 1.
@@ -1164,7 +1086,7 @@ class Tetris {
   using PlaceMap = std::vector<std::array<std::array<bool, kM>, kN>>;
 
   PlaceMap GetPlacements(const Field& field, int piece) {
-    Map_ mp = Dijkstra_(GetMap_(field, piece), current_start_position_);
+    Map_ mp = Dijkstra_(GetMap_(field, piece), kStartPosition_);
     PlaceMap ret(mp.size(), PlaceMap::value_type{});
     for (size_t r = 0; r < mp.size(); r++) {
       for (size_t x = 0; x < kN; x++) {
@@ -1299,7 +1221,7 @@ public:
       }
     }
     puts("Misc:");
-    float* misc = (float*)st[13].data();
+    float* misc = (float*)st[14].data();
     for (int i = 0; i < 7; i++) printf("%d ", (int)misc[i]);
     puts("");
     for (int i = 7; i < 15; i++) printf("%d ", (int)misc[i]);
@@ -1324,28 +1246,6 @@ public:
 #endif
 };
 
-#if defined(MIRROR_PIECES_SAME_ROTATION) || defined(MIRROR_PIECES_COMPAT)
-decltype(Tetris::kBlocks_) Tetris::kBlocks_ = {
-    {{{{1, 0}, {0, 0}, {0, 1}, {0, -1}}}, // T
-     {{{1, 0}, {0, 0}, {-1, 0}, {0, -1}}},
-     {{{0, -1}, {0, 0}, {0, 1}, {-1, 0}}},
-     {{{1, 0}, {0, 0}, {0, 1}, {-1, 0}}}},
-    {{{{0, -1}, {0, 0}, {0, 1}, {1, 1}}}, // J
-     {{{-1, 0}, {0, 0}, {1, -1}, {1, 0}}},
-     {{{-1, -1}, {0, -1}, {0, 0}, {0, 1}}},
-     {{{-1, 0}, {-1, 1}, {0, 0}, {1, 0}}}},
-    {{{{0, -1}, {0, 0}, {1, 0}, {1, 1}}}, // Z
-     {{{-1, 0}, {0, -1}, {0, 0}, {1, -1}}}},
-    {{{{0, -1}, {0, 0}, {1, -1}, {1, 0}}}}, // O
-    {{{{0, 0}, {0, 1}, {1, -1}, {1, 0}}}, // S
-     {{{-1, -1}, {0, -1}, {0, 0}, {1, 0}}}},
-    {{{{0, -1}, {0, 0}, {0, 1}, {1, -1}}}, // L
-     {{{-1, -1}, {-1, 0}, {0, 0}, {1, 0}}},
-     {{{-1, 1}, {0, -1}, {0, 0}, {0, 1}}},
-     {{{-1, 0}, {0, 0}, {1, 0}, {1, 1}}}},
-    {{{{0, -1}, {0, 0}, {0, 1}, {0, 2}}}, // I
-     {{{-2, 0}, {-1, 0}, {0, 0}, {1, 0}}}}};
-#else
 decltype(Tetris::kBlocks_) Tetris::kBlocks_ = {
     {{{{1, 0}, {0, 0}, {0, 1}, {0, -1}}}, // T
      {{{1, 0}, {0, 0}, {-1, 0}, {0, -1}}},
@@ -1366,7 +1266,6 @@ decltype(Tetris::kBlocks_) Tetris::kBlocks_ = {
      {{{-1, 0}, {0, 0}, {1, 0}, {1, 1}}}},
     {{{{0, -2}, {0, -1}, {0, 0}, {0, 1}}}, // I
      {{{-2, 0}, {-1, 0}, {0, 0}, {1, 0}}}}};
-#endif
 #ifndef _MSC_VER
 #define TETRIS_DEFINE_STATIC(x) decltype(Tetris::x) Tetris::x
 TETRIS_DEFINE_STATIC(kTransitionProb_);
@@ -1405,13 +1304,13 @@ static int TetrisInit(Tetris* self, PyObject* args, PyObject* kwds) {
 }
 
 static PyObject* Tetris_ResetRandom(Tetris* self, PyObject* args, PyObject* kwds) {
-  static const char* kwlist[] = {"pre_trans", "left_deduct", "penalty_multiplier", "reward_ratio", "normal_rate", nullptr};
-  double pre_trans = 1.0, left_deduct = 0.2, penalty_multiplier = 0.0, reward_ratio = 0.2, normal_rate = 1.0;
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "ddddd", (char**)kwlist,
-                                   &pre_trans, &left_deduct, &penalty_multiplier, &reward_ratio, &normal_rate)) {
+  static const char* kwlist[] = {"pre_trans", "penalty_multiplier", "reward_ratio", nullptr};
+  double pre_trans = 1.0, penalty_multiplier = 0.0, reward_ratio = 0.2;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "ddd", (char**)kwlist,
+                                   &pre_trans, &penalty_multiplier, &reward_ratio)) {
     return nullptr;
   }
-  self->ResetRandom(pre_trans, left_deduct, penalty_multiplier, reward_ratio, normal_rate);
+  self->ResetRandom(pre_trans, penalty_multiplier, reward_ratio);
   Py_RETURN_NONE;
 }
 
@@ -1581,7 +1480,7 @@ static PyObject* Tetris_StateShape(void*, PyObject* Py_UNUSED(ignored)) {
 static PyObject* Tetris_ResetGame(Tetris* self, PyObject* args, PyObject* kwds) {
   static const char* kwlist[] = {
       "start_level", "hz_avg", "hz_dev", "microadj_delay", "start_lines",
-      "drought_mode", "step_points", "left_deduct", "penalty_multiplier",
+      "drought_mode", "step_points", "penalty_multiplier", "target_column",
       nullptr
   };
   int start_level = 18;
@@ -1591,15 +1490,15 @@ static PyObject* Tetris_ResetGame(Tetris* self, PyObject* args, PyObject* kwds) 
   int start_lines = 0;
   int drought_mode = 0;
   double step_points = 0;
-  double left_deduct = 0.2;
   double penalty_multiplier = 1.0;
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|iddiipddd", (char**)kwlist,
+  int target_column = -1;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|iddiipddi", (char**)kwlist,
         &start_level, &hz_avg, &hz_dev, &microadj_delay, &start_lines,
-        &drought_mode, &step_points, &left_deduct, &penalty_multiplier)) {
+        &drought_mode, &step_points, &penalty_multiplier, &target_column)) {
     return nullptr;
   }
   self->ResetGame(start_level, hz_avg, hz_dev, microadj_delay, start_lines,
-      drought_mode, step_points, left_deduct, penalty_multiplier, 1.0 /* normal_rate */);
+      drought_mode, step_points, penalty_multiplier);
   Py_RETURN_NONE;
 }
 
@@ -1683,7 +1582,7 @@ static PyObject* StatesPyObjectWithNextPiece(const std::vector<Tetris::State>& s
   uint8_t* dest = (uint8_t*)PyArray_DATA((PyArrayObject*)ret);
   for (size_t i = 0; i < states.size(); i++) {
     Tetris::State tmp_state = states[i];
-    float* misc = (float*)tmp_state[13].data();
+    float* misc = (float*)tmp_state[14].data();
     // 7-14: next / 7(if place_stage_)
     for (size_t j = 7; j <= 14; j++) misc[j] = 0;
     for (size_t j = 0; j < 7; j++) {

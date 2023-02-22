@@ -18,6 +18,7 @@ microadj_delay = 21
 start_level = 18
 drought_mode = False
 step_points = 0.0
+target_column = -1
 search_enable = False
 first_gain = 100.
 
@@ -116,7 +117,7 @@ class GameConn(socketserver.BaseRequestHandler):
                     # adjustable: hz_dev, hz_dev, microadj_delay, drought_mode, start_level, step_points
                     st = {'hz_avg': hz_avg, 'hz_dev': hz_dev, 'microadj_delay': microadj_delay,
                           'drought_mode': drought_mode, 'start_level': start_level,
-                          'step_points': step_points}
+                          'step_points': step_points, 'target_column': target_column}
                     game.ResetGame(**st)
                     print()
                     print()
@@ -149,6 +150,7 @@ if __name__ == "__main__":
     parser.add_argument('--step-points', type = float)
     parser.add_argument('--drought-mode', action = 'store_true')
     parser.add_argument('--first-gain', type = float)
+    parser.add_argument('--target-column', type = float)
     args = parser.parse_args()
     print(args)
     if args.hz_avg is not None: hz_avg = args.hz_avg
@@ -159,6 +161,7 @@ if __name__ == "__main__":
     if args.first_gain is not None:
         first_gain = args.first_gain
         search_enable = first_gain >= 0
+    if args.target_column is not None: target_column = args.target_column
     drought_mode = args.drought_mode
 
     with torch.no_grad():

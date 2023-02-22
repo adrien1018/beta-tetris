@@ -8,7 +8,7 @@ from torch.cuda.amp import autocast
 from game import kH, kW
 
 # refer to Tetris::GetState for details
-kOrd = 13
+kOrd = 14
 kBoardChannel = 1 + 15
 kOtherChannel = (kOrd - 1) + (55 - 15)
 
@@ -111,6 +111,7 @@ class Model(nn.Module):
 
     @staticmethod
     def preprocess(obs: torch.Tensor):
+        ORD = 14
         PIECE_MAP = [
             [0,1,2,3],
             [4,5,6,7],
@@ -125,13 +126,13 @@ class Model(nn.Module):
         # q1, misc1: before intermediate level
         # q2, misc2: after intermediate level
         q1 = torch.zeros((batch, 1 + 15, h, w), dtype = torch.float32, device = obs.device)
-        q2 = torch.zeros((batch, (13 - 1) + (55 - 15), h, w), dtype = torch.float32, device = obs.device)
-        misc1 = obs[:,13].view(batch, -1)[:,:15]
-        misc2 = obs[:,13].view(batch, -1)[:,15:55]
+        q2 = torch.zeros((batch, (ORD - 1) + (55 - 15), h, w), dtype = torch.float32, device = obs.device)
+        misc1 = obs[:,ORD].view(batch, -1)[:,:15]
+        misc2 = obs[:,ORD].view(batch, -1)[:,15:55]
         q1[:,:1] = obs[:,:1]
         q1[:,1:] = misc1.view(batch, -1, 1, 1)
-        q2[:,:13-1] = obs[:,1:13]
-        q2[:,13-1:] = misc2.view(batch, -1, 1, 1)
+        q2[:,:ORD-1] = obs[:,1:ORD]
+        q2[:,ORD-1:] = misc2.view(batch, -1, 1, 1)
         # for gather
         nmap = torch.LongTensor(PIECE_MAP).to(obs.device)
         pieces = torch.argmax(misc1[:,:7], 1)

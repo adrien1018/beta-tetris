@@ -20,11 +20,12 @@ microadj_delay = 21
 start_level = 18
 drought_mode = False
 step_points = 100.
+target_column = -1
 
 def ResetGame(game):
     game.ResetGame(hz_avg = hz_avg, hz_dev = hz_dev, drought_mode = drought_mode,
                    microadj_delay = microadj_delay, start_level = start_level,
-                   step_points = step_points)
+                   step_points = step_points, target_column = target_column)
 
 #def GetSeed(i):
 #    return (i * 1242973851 + 1)
@@ -196,6 +197,7 @@ if __name__ == "__main__":
     parser.add_argument('--start-level', type = int)
     parser.add_argument('--step-points', type = float)
     parser.add_argument('--drought-mode', action = 'store_true')
+    parser.add_argument('--target-column', type = int)
     args = parser.parse_args()
     print(args)
     if args.hz_avg is not None: hz_avg = args.hz_avg
@@ -203,5 +205,6 @@ if __name__ == "__main__":
     if args.microadj_delay is not None: microadj_delay = args.microadj_delay
     if args.start_level is not None: start_level = args.start_level
     if args.step_points is not None: step_points = args.step_points
+    if args.target_column is not None: target_column = args.target_column
     drought_mode = args.drought_mode
     Main(args.model)
