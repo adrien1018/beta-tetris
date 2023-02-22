@@ -165,6 +165,10 @@ class Tetris {
   int target_column_ = -1;
   bool target_column_lock_ = false;
 
+  // For random state balancing
+  int current_state_steps_ = 1000;
+  double steps_exp_avg_ = 40.;
+
   void SetTargetColumn_() {
     if (target_column_lock_) return;
     target_column_ = std::uniform_int_distribution<int>(-5, 15)(rng_);
@@ -758,7 +762,8 @@ class Tetris {
 
   void ResetGame(int start_level = 18, double hz_avg = 12, double hz_dev = 0,
                  int microadj_delay = 40, int start_lines = 0, bool drought_mode = false,
-                 double step_points = 0, double penalty_multiplier = 1.0, int target_column = -2) {
+                 double step_points = 0, double penalty_multiplier = 1.0,
+                 int target_column = -2) {
     start_level_ = start_level;
     lines_ = start_lines;
     start_lines_ = start_lines;
@@ -791,6 +796,17 @@ class Tetris {
   }
 
   void ResetRandom(float pre_trans, double penalty_multiplier, double reward_ratio) {
+    int steps = pieces_ - start_lines_ * 10 / 4;
+    current_state_steps_ += steps;
+    steps_exp_avg_ = steps * (1./128) + steps_exp_avg_ * (1 - 1./128);
+    if (current_state_steps_ < 1.25 * steps_exp_avg_) {
+      // don't change mode if steps not enough to ensure correct data distribution
+      ResetGame(start_level_, hz_avg_, hz_dev_, microadj_delay_, start_lines_,
+                drought_mode_, int(step_reward_ / (kRewardMultiplier_ * 0.5) + 5) / 10 * 10,
+                penalty_multiplier);
+      return;
+    }
+    current_state_steps_ = 0;
     using IntRand = std::uniform_int_distribution<int>;
     using RealRand = std::uniform_real_distribution<float>;
     constexpr double hz_table[] = {12, 13.5, 15, 20, 30};
@@ -805,8 +821,6 @@ class Tetris {
     double step_points = step_points_table[std::discrete_distribution<int>({1, reward_ratio, std::pow(reward_ratio, 1.5)})(rng_)];
     int start_lines = 0;
     bool drought_mode = IntRand(0, 2)(rng_) == 0;
-    // 29-start will be very short when hz<15, resulting in imbalanced traning data
-    if (hz_avg < 15 && IntRand(0, 2)(rng_)) start_level = 29;
     if (IntRand(0, 1)(rng_)) {
       hz_avg = IntRand(0, 1)(rng_) ? 12 : 20;
       microadj_delay = 21;
