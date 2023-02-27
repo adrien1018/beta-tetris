@@ -49,12 +49,18 @@ class TorchSaver(ModelSaver):
                     raise RuntimeError('Cannot shrink model')
                 self_state[i][:li.shape[0],:li.shape[1]] = li
                 self_state[i][:li.shape[0],li.shape[1]:] = 0
+            elif len(si.shape) == 3: # LayerNorm: (ch, h, w)
+                if si.shape[1:] != li.shape[1:]:
+                    raise RuntimeError('Feature size not compatible')
+                if si.shape[0] < li.shape[0]:
+                    raise RuntimeError('Cannot shrink model')
+                self_state[i][:li.shape[0]] = li
             elif len(si.shape) == 2: # Linear: (out, in)
                 if any([si.shape[i] < li.shape[i] for i in range(2)]):
                     raise RuntimeError('Cannot shrink model')
                 self_state[i][:li.shape[0],:li.shape[1]] = li
                 self_state[i][:li.shape[0],li.shape[1]:] = 0
-            elif len(si.shape) == 1: # bias for Conv2d/Linear
+            elif len(si.shape) == 1: # BatchNorm: (ch,) / bias for Conv2d/Linear/BatchNorm
                 self_state[i][:li.shape[0]] = li
             else:
                 raise RuntimeError('Model not compatible')

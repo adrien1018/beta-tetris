@@ -49,6 +49,7 @@ class DataGenerator:
             if state_dict[i].device != target_device:
                 state_dict[i] = state_dict[i].to(target_device)
         self.model.load_state_dict(state_dict)
+        self.model.eval()
 
         stats = np.zeros((4, 10), dtype='uint64')
         for i in self.workers:

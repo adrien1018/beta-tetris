@@ -173,7 +173,7 @@ class Tetris {
   void SetTargetColumn_(bool force = false) {
     if (!force && target_column_lock_) return;
     prev_target_column_change_ = lines_;
-    target_column_ = std::uniform_int_distribution<int>(-3, 14)(rng_);
+    target_column_ = std::uniform_int_distribution<int>(-3, 11)(rng_);
     if (target_column_ > 9) target_column_ = 9;
     if (target_column_ < -1) target_column_ = -1;
   }
@@ -708,8 +708,8 @@ class Tetris {
     pieces_++;
     double orig_score_reward = kRewardMultiplier_ * score_delta;
     double score_reward = orig_score_reward;
-    if (real_lines >= 2 && pos.y == target_column_) {
-      score_reward *= real_lines * 0.75;
+    if (real_lines == 4 && pos.y == target_column_) {
+      score_reward *= 5;
     }
     if (!target_column_lock_ &&
         lines_ + real_lines - prev_target_column_change_ >= 16 &&
