@@ -154,7 +154,7 @@ class Tetris {
   static constexpr double kMisdropReward_ = -0.001;
   // Provide a small reward deduction each time the agent makes an misdrop;
   //   this can guide the agent to avoid high-risk movements
-  static constexpr double kBottomGain_ = 0.1;
+  static constexpr double kBottomGain_ = 0.5;
   // Provide a reward gain for bottom row scoring to guide the agent to not
   //   score dirty tetrises.
   // This can be decreased during training.
@@ -709,7 +709,7 @@ class Tetris {
     double orig_score_reward = kRewardMultiplier_ * score_delta;
     double score_reward = orig_score_reward;
     if (real_lines == 4 && pos.y == target_column_) {
-      score_reward *= 5;
+      score_reward *= 4;
     }
     if (!target_column_lock_ &&
         lines_ + real_lines - prev_target_column_change_ >= 16 &&
@@ -793,8 +793,8 @@ class Tetris {
     real_placement_set_ = false;
     tetris_count_ = 0;
     right_tetris_count_ = 0;
-    target_column_ = target_column_;
-    target_column_lock_ = target_column_ != -2;
+    target_column_ = target_column;
+    target_column_lock_ = target_column != -2;
     SetTargetColumn_();
     StoreMap_(false);
   }
@@ -803,7 +803,7 @@ class Tetris {
     int steps = pieces_ - start_lines_ * 10 / 4;
     current_state_steps_ += steps;
     steps_exp_avg_ = steps * (1./128) + steps_exp_avg_ * (1 - 1./128);
-    if (current_state_steps_ < 1.25 * steps_exp_avg_) {
+    if (current_state_steps_ < 384) {
       // don't change mode if steps not enough to ensure correct data distribution
       ResetGame(start_level_, hz_avg_, hz_dev_, microadj_delay_, start_lines_,
                 drought_mode_, int(step_reward_ / (kRewardMultiplier_ * 0.5) + 5) / 10 * 10,
@@ -1518,7 +1518,7 @@ static PyObject* Tetris_ResetGame(Tetris* self, PyObject* args, PyObject* kwds) 
     return nullptr;
   }
   self->ResetGame(start_level, hz_avg, hz_dev, microadj_delay, start_lines,
-      drought_mode, step_points, penalty_multiplier);
+      drought_mode, step_points, penalty_multiplier, target_column);
   Py_RETURN_NONE;
 }
 

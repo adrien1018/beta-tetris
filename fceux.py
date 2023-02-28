@@ -123,7 +123,7 @@ class GameConn(socketserver.BaseRequestHandler):
                     print()
                     print('Current game:')
                     print('Start level: {}, drought mode: {}'.format(start_level, st['drought_mode']))
-                    print('Step points:', st['step_points'])
+                    print('Step points: {}, target column: {}'.format(st['step_points'], st['target_column']))
                     print('Tapping speed:', 'NormalDistribution({}, {})'.format(st['hz_avg'], st['hz_dev']) if st['hz_dev'] > 0 else 'constant {}'.format(st['hz_avg']), 'Hz')
                     print('Microadjustment delay:', st['microadj_delay'], 'frames', flush = True)
                     game.SetNowPiece(cur)
@@ -150,7 +150,9 @@ if __name__ == "__main__":
     parser.add_argument('--step-points', type = float)
     parser.add_argument('--drought-mode', action = 'store_true')
     parser.add_argument('--first-gain', type = float)
-    parser.add_argument('--target-column', type = float)
+    parser.add_argument('--target-column', type = int)
+    parser.add_argument('--bind', type = str)
+    parser.add_argument('--port', type = int)
     args = parser.parse_args()
     print(args)
     if args.hz_avg is not None: hz_avg = args.hz_avg
@@ -174,9 +176,9 @@ if __name__ == "__main__":
     # load GPU first to reduce lag
     GetStrat(model, tetris.Tetris())
 
-    print('Ready')
-    HOST, PORT = 'localhost', 3456
+    HOST, PORT = args.bind or '0.0.0.0', args.port or 3456
     with socketserver.TCPServer((HOST, PORT), GameConn) as server:
+        print(f'Listening on {HOST}:{PORT}')
         try:
             server.serve_forever()
         except KeyboardInterrupt:
