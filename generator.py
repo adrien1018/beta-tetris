@@ -34,10 +34,11 @@ class DataGenerator:
         # create workers
         shm = [(shm.name, shape, typ) for shm, shape, typ in zip(self.shms, shapes, types)]
         self.workers = [Worker(name, shm, self.w_range(i), 27 + i) for i in range(self.n_workers)]
+
+        self.set_params(game_params)
         for i in self.workers: i.child.send(('reset', None))
         for i in self.workers: i.child.recv()
 
-        self.set_params(game_params)
         self.obs = obs_to_torch(self.obs_np, self.device)
         self.logfile = open('logs/{}/logs'.format(name), 'a')
 
@@ -123,8 +124,8 @@ class DataGenerator:
                         ret_info['scorek'].append(info['score'] * 1e-3)
                         ret_info['lns'].append(info['lines'])
                         ret_info['len'].append(info['length'])
-                        ret_info['trt'].append(info['tetris'])
-                        ret_info['rtrt'].append(info['rtetris'])
+                        ret_info['trt'].append(info['trt'])
+                        ret_info['rtrt'].append(info['rtrt'])
             self.obs = obs_to_torch(self.obs_np, self.device)
 
         # reshape rewards & log rewards

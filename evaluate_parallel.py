@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 
-import argparse
+import argparse, traceback
 import numpy as np, torch, sys, random, time, os.path, pickle
 from torch.distributions import Categorical
 from torch.multiprocessing import Process, Pipe
 
 import tetris
 
-from game import Game, kH, kW, kTensorDim
+from game import kH, kW, kTensorDim
 from model import Model, ConvBlock, obs_to_torch
 from config import Configs
 from torch.nn import functional as F
@@ -19,7 +19,7 @@ hz_dev = 0
 microadj_delay = 21
 start_level = 18
 drought_mode = False
-step_points = 100.
+step_points = 100
 target_column = -1
 
 def ResetGame(game):
@@ -32,7 +32,7 @@ def ResetGame(game):
 def GetSeed(i):
     return (i * 42973851 + 45)
 
-def worker_process(remote, q_size, id):
+def worker_loop(remote, q_size, id):
     games = [tetris.Tetris(GetSeed(i)) for i in range(q_size)]
     rewards = [0. for i in range(q_size)]
     is_running = [True for i in range(q_size)]
@@ -91,6 +91,15 @@ def worker_process(remote, q_size, id):
             remote.close()
             return
 
+
+def worker_process(remote, q_size, id):
+    try:
+        worker_loop(remote, q_size, id)
+    except:
+        print(traceback.format_exc())
+        raise
+
+
 class Worker:
     def __init__(self, q_size, i):
         self.child, parent = Pipe()
@@ -109,8 +118,8 @@ def Main(model_path):
     else: model.load_state_dict(torch.load(model_path))
     model.eval()
 
-    batch_size = 512
-    n = 1000
+    batch_size = 256
+    n = 256
     q_size = 256
     assert batch_size % q_size == 0
     n_workers = batch_size // q_size
@@ -195,7 +204,7 @@ if __name__ == "__main__":
     parser.add_argument('--hz-dev', type = float)
     parser.add_argument('--microadj-delay', type = int)
     parser.add_argument('--start-level', type = int)
-    parser.add_argument('--step-points', type = float)
+    parser.add_argument('--step-points', type = int)
     parser.add_argument('--drought-mode', action = 'store_true')
     parser.add_argument('--target-column', type = int)
     args = parser.parse_args()

@@ -6,7 +6,7 @@ from torch.distributions import Categorical
 
 import tetris
 
-from game import Game, kH, kW, kTensorDim
+from game import kH, kW, kTensorDim
 from model import Model, ConvBlock, obs_to_torch
 from config import Configs
 
@@ -17,7 +17,7 @@ hz_dev = 0
 microadj_delay = 21
 start_level = 18
 drought_mode = False
-step_points = 0.0
+step_points = 0
 target_column = -1
 search_enable = False
 first_gain = 100.
@@ -147,7 +147,7 @@ if __name__ == "__main__":
     parser.add_argument('--hz-dev', type = float)
     parser.add_argument('--microadj-delay', type = int)
     parser.add_argument('--start-level', type = int)
-    parser.add_argument('--step-points', type = float)
+    parser.add_argument('--step-points', type = int)
     parser.add_argument('--drought-mode', action = 'store_true')
     parser.add_argument('--first-gain', type = float)
     parser.add_argument('--target-column', type = int)
@@ -168,7 +168,7 @@ if __name__ == "__main__":
 
     with torch.no_grad():
         c = Configs()
-        model = Model(c.channels, c.blocks).to(device)
+        model = Model(*c.model_args()).to(device)
         model_path = args.model
         if model_path[-3:] == 'pkl': model.load_state_dict(torch.load(model_path)[0].state_dict())
         else: model.load_state_dict(torch.load(model_path))

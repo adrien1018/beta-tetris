@@ -8,7 +8,7 @@ class Configs(BaseConfigs):
     ## NN
     start_blocks: int = 3
     end_blocks: int = 3
-    channels: int = 128
+    channels: int = 192
 
     def model_args(self):
         return (self.start_blocks, self.end_blocks, self.channels)
