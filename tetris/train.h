@@ -35,8 +35,9 @@ class TrainingManager {
     std::vector<uint8_t> is_over;
     std::vector<std::unordered_map<std::string, std::variant<int, double>>> info;
   };
+  using StateMap = std::unordered_map<NormalizingParams, std::pair<double, int64_t>>;
  private:
-  std::unordered_map<NormalizingParams, std::pair<double, int64_t>> avg_infor_;
+  StateMap avg_infor_;
   std::vector<Tetris> envs_;
   std::vector<double> reward_multiplier_;
   std::vector<double> tot_rewards_;
@@ -61,6 +62,8 @@ class TrainingManager {
   std::vector<Tetris::State> Init(size_t sz, uint64_t seed);
   void ResetGame(size_t idx);
   ActionResult Step(const std::vector<int>& actions);
+  const StateMap& GetState() const { return avg_infor_; }
+  void LoadState(StateMap&& st);
 };
 
 #endif // TRAIN_H_

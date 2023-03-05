@@ -122,7 +122,7 @@ class Tetris {
   static constexpr double kMisdropReward_ = -0.001;
   // Provide a small reward deduction each time the agent makes an misdrop;
   //   this can guide the agent to avoid high-risk movements
-  static constexpr double kBottomMultiplier_ = 2.5;
+  static constexpr double kBottomMultiplier_ = 1.2;
   static constexpr double kTargetColumnMultiplier_ = 2.5;
   // Provide a reward gain for bottom row scoring to guide the agent to not
   //   score dirty tetrises.

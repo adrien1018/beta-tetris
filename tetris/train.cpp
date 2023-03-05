@@ -133,3 +133,9 @@ TrainingManager::ActionResult TrainingManager::Step(const std::vector<int>& acti
   }
   return ret;
 }
+
+void TrainingManager::LoadState(TrainingManager::StateMap&& st) {
+  avg_infor_ = std::move(st);
+  total_length_ = 0;
+  for (auto& i : avg_infor_) total_length_ += i.second.second;
+}

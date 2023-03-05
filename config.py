@@ -19,7 +19,7 @@ class Configs(BaseConfigs):
     gamma: float = FloatDynamicHyperParam(0.99 ** 0.5, range_ = (0.98, 1))
     lamda: float = FloatDynamicHyperParam(0.93, range_ = (0.9, 1))
     # number of updates
-    updates: int = 200000
+    updates: int = 400000
     # number of epochs to train the model with sampled data
     epochs: int = 1
     # number of worker processes

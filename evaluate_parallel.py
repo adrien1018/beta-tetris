@@ -118,9 +118,9 @@ def Main(model_path):
     else: model.load_state_dict(torch.load(model_path))
     model.eval()
 
-    batch_size = 256
+    batch_size = 128
     n = 256
-    q_size = 256
+    q_size = 128
     assert batch_size % q_size == 0
     n_workers = batch_size // q_size
     workers = [Worker(q_size, i) for i in range(n_workers)]

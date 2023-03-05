@@ -1,4 +1,4 @@
-import math, traceback
+import math, traceback, pickle, os
 import numpy as np, torch
 from multiprocessing import shared_memory
 from torch.multiprocessing import Process, Pipe
@@ -41,6 +41,8 @@ class DataGenerator:
 
         self.obs = obs_to_torch(self.obs_np, self.device)
         self.logfile = open('logs/{}/logs'.format(name), 'a')
+        self.statefilename = 'logs/{}/states/'.format(name)
+        os.makedirs(self.statefilename, exist_ok=True)
 
     def w_range(self, x): return slice(x * self.env_per_worker, (x + 1) * self.env_per_worker)
 
@@ -53,9 +55,15 @@ class DataGenerator:
         self.model.eval()
 
         stats = np.zeros((4, 10), dtype='uint64')
+        totstate = {}
         for i in self.workers:
             i.child.send(('get_stats', epoch))
-            stats += i.child.recv()
+            cols, st = i.child.recv()
+            stats += cols
+            for i, j in st.items():
+                if i not in totstate: totstate[i] = j
+                else:
+                    totstate[i] = (totstate[i][0] + j[0], totstate[i][1] + j[1])
         names = ['SGL', 'DBL', 'TRP', 'TET']
         print(epoch, end='', file=self.logfile)
         for i in range(4):
@@ -63,6 +71,8 @@ class DataGenerator:
             for j in stats[i]:
                 print(' ' + str(j), end='', file=self.logfile)
         print(file=self.logfile, flush=True)
+        with open(self.statefilename + str(epoch % 3) + '.pkl', 'wb') as f:
+            pickle.dump(totstate, f)
 
     def set_params(self, game_params):
         for i in self.workers:

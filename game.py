@@ -38,7 +38,7 @@ def worker_process(remote, name: str, shms: list, idx: slice, seed: int):
                 manager.SetResetParams(*data)
             elif cmd == "get_stats":
                 epoch = data
-                remote.send(tetris.GetClearCol())
+                remote.send((tetris.GetClearCol(), manager.GetState()))
             else:
                 raise NotImplementedError
     except:

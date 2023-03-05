@@ -3,3 +3,4 @@ test/
 .labml.yaml
 __pycache__/
 tetris/.nfs*
+scripts/

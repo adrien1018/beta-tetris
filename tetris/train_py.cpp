@@ -97,7 +97,7 @@ static PyObject* TrainingManager_Step(TrainingManager* self, PyObject* args, PyO
   PyArrayObject* np_array = reinterpret_cast<PyArrayObject*>(py_arr);
   if (!PyArray_Check(np_array)) {
     PyErr_SetString(PyExc_TypeError, "Argument must be a NumPy array.");
-    return NULL;
+    return nullptr;
   }
   if (PyArray_TYPE(np_array) != NPY_INT) {
     PyArray_Descr* dtype = PyArray_DescrFromType(NPY_INT32);
@@ -141,6 +141,35 @@ static PyObject* TrainingManager_Step(TrainingManager* self, PyObject* args, PyO
   return ret;
 }
 
+static PyObject* TrainingManager_GetState(TrainingManager* self, PyObject* Py_UNUSED(ignored)) {
+  auto mp = self->GetState();
+  PyObject* dict = PyDict_New();
+  for (const auto& [key, value] : mp) {
+    PyObject* py_key = Py_BuildValue("(iiiiii)",
+        key.start_level, key.hz_mode, key.step_points, key.target_column_mode,
+        key.start_line_mode, key.drought_mode);
+    PyObject* py_value = Py_BuildValue("(dl)", value.first, value.second);
+    PyDict_SetItem(dict, py_key, py_value);
+    Py_DECREF(py_key);
+    Py_DECREF(py_value);
+  }
+  return dict;
+}
+
+static PyObject* TrainingManager_LoadState(TrainingManager* self, PyObject* args, PyObject* kwds) {
+  static const char *kwlist[] = {"state", nullptr};
+  PyObject* state;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", (char**)kwlist, &state)) {
+    return nullptr;
+  }
+  if (!PyArray_Check(state)) {
+    PyErr_SetString(PyExc_TypeError, "Argument must be a dictionary.");
+    return nullptr;
+  }
+  // TODO
+  Py_RETURN_NONE;
+}
+
 static PyMethodDef py_training_manager_class_methods[] = {
     {"__getitem__", (PyCFunction)TrainingManager_getitem,
      METH_VARARGS, "Get a Tetris instance"},
@@ -152,6 +181,10 @@ static PyMethodDef py_training_manager_class_methods[] = {
      METH_VARARGS | METH_KEYWORDS, "Reset a specific agent"},
     {"Step", (PyCFunction)TrainingManager_Step,
      METH_VARARGS | METH_KEYWORDS, "Make a step on all agents and return training information"},
+    {"GetState", (PyCFunction)TrainingManager_GetState,
+     METH_NOARGS, "Get current manager state"},
+    {"LoadState", (PyCFunction)TrainingManager_LoadState,
+     METH_VARARGS | METH_KEYWORDS, "Load manager state"},
     {nullptr}};
 
 PyTypeObject py_training_manager_class = {
