@@ -46,6 +46,8 @@ class Configs(BaseConfigs):
 
     save_interval: int = 500
 
+    freeze_multiplier: int = 0
+
 
 def LoadConfig(with_experiment = True):
     parser = argparse.ArgumentParser()

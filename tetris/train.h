@@ -48,17 +48,18 @@ class TrainingManager {
   ResetParams reset_params_;
   int64_t total_length_;
   std::mt19937_64 gen_;
+  bool freeze_;
 
   static constexpr int kKeepParamPieces_ = 384;
   static constexpr double kPerStepNorm_ = 0.05;
 
  public:
-  TrainingManager() : total_length_(0) {}
+
+  TrainingManager(bool freeze = false) : total_length_(0), freeze_(freeze) {}
 
   Tetris& operator[](size_t idx) { return envs_[idx]; }
 
   void SetResetParams(const ResetParams& params) { reset_params_ = params; }
-  // TODO
   std::vector<Tetris::State> Init(size_t sz, uint64_t seed);
   void ResetGame(size_t idx);
   ActionResult Step(const std::vector<int>& actions);

@@ -8,13 +8,13 @@ import tetris
 kTensorDim = tetris.Tetris.StateShape()
 kH, kW = kTensorDim[1:]
 
-def worker_process(remote, name: str, shms: list, idx: slice, seed: int):
+def worker_process(remote, name: str, shms: list, idx: slice, seed: int, freeze_multiplier: bool):
     shms = [(shared_memory.SharedMemory(name), shape, typ) for name, shape, typ in shms]
     shm_obs, shm_reward, shm_over = [
             np.ndarray(shape, dtype = typ, buffer = shm.buf) for shm, shape, typ in shms]
     # create game environments
     num = idx.stop - idx.start
-    manager = tetris.TrainingManager()
+    manager = tetris.TrainingManager(freeze_multiplier)
     # wait for instructions from the connection and execute them
     try:
         while True:
@@ -36,6 +36,8 @@ def worker_process(remote, name: str, shms: list, idx: slice, seed: int):
                 break
             elif cmd == "set_param":
                 manager.SetResetParams(*data)
+            elif cmd == "load_multiplier":
+                manager.LoadState(data)
             elif cmd == "get_stats":
                 epoch = data
                 remote.send((tetris.GetClearCol(), manager.GetState()))
@@ -50,9 +52,7 @@ def worker_process(remote, name: str, shms: list, idx: slice, seed: int):
 
 class Worker:
     """Creates a new worker and runs it in a separate process."""
-    def __init__(self, name, shms, idx, seed):
+    def __init__(self, *args):
         self.child, parent = Pipe()
-        self.process = Process(
-                target = worker_process,
-                args = (parent, name, shms, idx, seed))
+        self.process = Process(target=worker_process, args=(parent, *args))
         self.process.start()

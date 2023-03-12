@@ -108,21 +108,23 @@ TrainingManager::ActionResult TrainingManager::Step(const std::vector<int>& acti
       info.emplace("trt", stat.first);
       info.emplace("rtrt", stat.second);
 
-      auto key = cur_params_[i].GetNormalizingParams();
-      auto& avg = avg_infor_.emplace(key, std::make_pair(kPerStepNorm_, 0)).first->second;
-      avg.second += tot_length_[i];
-      total_length_ += tot_length_[i];
-      double ratio = 8192. / tot_length_[i];
-      // make it proceed to average faster when the frequency is low
-      if (total_length_ > 30 * avg.second) ratio /= (double)total_length_ / avg.second / 30;
-      double alpha = 1. / (5 + ratio);
-      double avg_reward = std::max(std::sqrt(tot_sq_rewards_[i] / tot_length_[i]), 1e-3);
-      avg.first = avg.first * (1 - alpha) + avg_reward * alpha;
-      /*
-      printf("(%d %d %d %d %d %d):%lf %.3lf %.1lf\n",
-          key.start_level, key.hz_mode, key.step_points, key.target_column_mode, key.start_line_mode, key.drought_mode,A
-          avg_reward, kPerStepNorm_ / avg.first, (double)total_length_ / avg.second);
-      */
+      if (!freeze_) {
+        auto key = cur_params_[i].GetNormalizingParams();
+        auto& avg = avg_infor_.emplace(key, std::make_pair(kPerStepNorm_, 0)).first->second;
+        avg.second += tot_length_[i];
+        total_length_ += tot_length_[i];
+        double ratio = 8192. / tot_length_[i];
+        // make it proceed to average faster when the frequency is low
+        if (total_length_ > 30 * avg.second) ratio /= (double)total_length_ / avg.second / 30;
+        double alpha = 1. / (5 + ratio);
+        double avg_reward = std::max(std::sqrt(tot_sq_rewards_[i] / tot_length_[i]), 1e-3);
+        avg.first = avg.first * (1 - alpha) + avg_reward * alpha;
+        /*
+        printf("(%d %d %d %d %d %d):%lf %.3lf %.1lf\n",
+            key.start_level, key.hz_mode, key.step_points, key.target_column_mode, key.start_line_mode, key.drought_mode,A
+            avg_reward, kPerStepNorm_ / avg.first, (double)total_length_ / avg.second);
+        */
+      }
       ResetGame(i);
       tot_rewards_[i] = 0.0;
       tot_sq_rewards_[i] = 0.0;

@@ -18,11 +18,12 @@ static PyObject* TrainingManagerNew(PyTypeObject* type, PyObject* args, PyObject
 }
 
 static int TrainingManagerInit(TrainingManager* self, PyObject* args, PyObject* kwds) {
-  static const char *kwlist[] = {nullptr};
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "", (char**)kwlist)) {
+  static const char *kwlist[] = {"freeze_multiplier", nullptr};
+  int freeze = 0;
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|p", (char**)kwlist, &freeze)) {
     return -1;
   }
-  new(self) TrainingManager();
+  new(self) TrainingManager(freeze);
   return 0;
 }
 
@@ -162,11 +163,26 @@ static PyObject* TrainingManager_LoadState(TrainingManager* self, PyObject* args
   if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", (char**)kwlist, &state)) {
     return nullptr;
   }
-  if (!PyArray_Check(state)) {
+  if (!PyDict_Check(state)) {
     PyErr_SetString(PyExc_TypeError, "Argument must be a dictionary.");
     return nullptr;
   }
-  // TODO
+  TrainingManager::StateMap mp;
+  PyObject *key, *value;
+  for (Py_ssize_t pos = 0; PyDict_Next(state, &pos, &key, &value);) {
+    NormalizingParams nkey;
+    std::pair<double, int64_t> nval;
+    if (!PyArg_ParseTuple(key, "iiiiii",
+        &nkey.start_level, &nkey.hz_mode, &nkey.step_points, &nkey.target_column_mode,
+        &nkey.start_line_mode, &nkey.drought_mode)) {
+      return nullptr;
+    }
+    if (!PyArg_ParseTuple(value, "dl", &nval.first, &nval.second)) {
+      return nullptr;
+    }
+    mp.emplace(nkey, nval);
+  }
+  self->LoadState(std::move(mp));
   Py_RETURN_NONE;
 }
 

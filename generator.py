@@ -7,21 +7,22 @@ from model import Model, obs_to_torch
 from game import kTensorDim, Worker
 
 class DataGenerator:
-    def __init__(self, name, model, n_workers, env_per_worker, worker_steps, game_params):
+    def __init__(self, name, model, c, game_params):
         self.model = model
-        self.n_workers = n_workers
-        self.env_per_worker = env_per_worker
-        self.envs = n_workers * env_per_worker
-        self.worker_steps = worker_steps
+        self.n_workers = c.n_workers
+        self.env_per_worker = c.env_per_worker
+        self.envs = c.n_workers * c.env_per_worker
+        self.worker_steps = c.worker_steps
         self.gamma, self.lamda = game_params[-2:]
         self.device = next(self.model.parameters()).device
         self.total_games = 0
+        self.freeze_multiplier = bool(c.freeze_multiplier)
         # TODO: Add networks
 
         # initialize tensors for observations
         shapes = [(self.envs, *kTensorDim),
-                  (self.envs, worker_steps, 2),
-                  (self.envs, worker_steps)]
+                  (self.envs, c.worker_steps, 2),
+                  (self.envs, c.worker_steps)]
         types = [np.dtype('float32'), np.dtype('float32'), np.dtype('bool')]
         self.shms = [
             shared_memory.SharedMemory(create = True, size = math.prod(shape) * typ.itemsize)
@@ -33,16 +34,35 @@ class DataGenerator:
         ]
         # create workers
         shm = [(shm.name, shape, typ) for shm, shape, typ in zip(self.shms, shapes, types)]
-        self.workers = [Worker(name, shm, self.w_range(i), 27 + i) for i in range(self.n_workers)]
+        self.workers = [Worker(name, shm, self.w_range(i), 27 + i, self.freeze_multiplier)
+                        for i in range(self.n_workers)]
+
+        self.logfile = open('logs/{}/logs'.format(name), 'a')
+        self.statefilename = 'logs/{}/states/'.format(name)
+        os.makedirs(self.statefilename, exist_ok=True)
+        self.load_multiplier()
 
         self.set_params(game_params)
         for i in self.workers: i.child.send(('reset', None))
         for i in self.workers: i.child.recv()
 
         self.obs = obs_to_torch(self.obs_np, self.device)
-        self.logfile = open('logs/{}/logs'.format(name), 'a')
-        self.statefilename = 'logs/{}/states/'.format(name)
-        os.makedirs(self.statefilename, exist_ok=True)
+
+    def load_multiplier(self):
+        for i in range(3):
+            try:
+                with open(self.statefilename + f'{i}.pkl', 'rb') as f:
+                    st = pickle.load(f)
+                for i in st:
+                    st[i] = (st[i][0], st[i][1] // 4)
+                for i in self.workers: i.child.send(('load_multiplier', st))
+                return
+            except: pass
+
+    def save_multiplier(self, x, epoch):
+        if self.freeze_multiplier: return
+        with open(self.statefilename + str(epoch % 3) + '.pkl', 'wb') as f:
+            pickle.dump(x, f)
 
     def w_range(self, x): return slice(x * self.env_per_worker, (x + 1) * self.env_per_worker)
 
@@ -64,6 +84,8 @@ class DataGenerator:
                 if i not in totstate: totstate[i] = j
                 else:
                     totstate[i] = (totstate[i][0] + j[0], totstate[i][1] + j[1])
+        for i in totstate:
+            totstate[i] = (totstate[i][0] / self.n_workers, totstate[i][1])
         names = ['SGL', 'DBL', 'TRP', 'TET']
         print(epoch, end='', file=self.logfile)
         for i in range(4):
@@ -71,8 +93,7 @@ class DataGenerator:
             for j in stats[i]:
                 print(' ' + str(j), end='', file=self.logfile)
         print(file=self.logfile, flush=True)
-        with open(self.statefilename + str(epoch % 3) + '.pkl', 'wb') as f:
-            pickle.dump(totstate, f)
+        self.save_multiplier(totstate, epoch)
 
     def set_params(self, game_params):
         for i in self.workers:
@@ -226,12 +247,11 @@ class DataGenerator:
             i.close()
             i.unlink()
 
-def generator_process(remote, name, model_args, *args):
+def generator_process(remote, name, c, game_params, device):
     torch.backends.cudnn.benchmark = True
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     try:
-        model = Model(*model_args).to(device)
-        generator = DataGenerator(name, model, *args)
+        model = Model(*c.model_args()).to(device)
+        generator = DataGenerator(name, model, c, game_params)
         samples = None
         while True:
             cmd, data = remote.recv()
@@ -260,7 +280,7 @@ class GeneratorProcess:
         self.child, parent = Pipe()
         ctx = torch.multiprocessing.get_context('spawn')
         self.process = ctx.Process(target = generator_process,
-                args = (parent, name, c.model_args(), c.n_workers, c.env_per_worker, c.worker_steps, game_params))
+                args = (parent, name, c, game_params, device))
         self.process.start()
         self.SendModel(model, -1)
 
