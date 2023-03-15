@@ -4,11 +4,9 @@
 #include <random>
 
 struct NormalizingParams {
-  int start_level;
   int hz_mode;
   int step_points;
   int target_column_mode;
-  int start_line_mode;
   int drought_mode;
 
   bool operator==(const NormalizingParams&) const = default;
@@ -21,9 +19,9 @@ template <>
 struct hash<NormalizingParams> {
   size_t operator()(const NormalizingParams& x) const {
     size_t a = 0;
-    a += (x.start_level + x.hz_mode * 37 + x.drought_mode * 2235) * 6093894908103630263L;
+    a += (x.hz_mode + x.drought_mode * 2235) * 6093894908103630263L;
     a ^= a >> 32;
-    a += (x.step_points + x.target_column_mode + x.start_line_mode * 5) * 3691759670834417381L;
+    a += (x.step_points + x.target_column_mode) * 3691759670834417381L;
     a ^= a >> 28;
     return a;
   }

@@ -7,7 +7,7 @@ static GameParams GetRandomParams(const ResetParams& params, T& rng_) {
   constexpr double hz_table[] = {12, 13.5, 15, 20, 30};
   constexpr double start_level_table[] = {18, 19, 29};
   constexpr int adj_delay_table[] = {8, 16, 21, 25, 61};
-  constexpr double step_points_table[] = {40, 200, 3000};
+  constexpr double step_points_table[] = {40, 400, 4000};
 
   using IntRand = std::uniform_int_distribution<int>;
   using RealRand = std::uniform_real_distribution<float>;
@@ -113,10 +113,10 @@ TrainingManager::ActionResult TrainingManager::Step(const std::vector<int>& acti
         auto& avg = avg_infor_.emplace(key, std::make_pair(kPerStepNorm_, 0)).first->second;
         avg.second += tot_length_[i];
         total_length_ += tot_length_[i];
-        double ratio = 8192. / tot_length_[i];
+        double ratio = 16384. / tot_length_[i];
         // make it proceed to average faster when the frequency is low
         if (total_length_ > 30 * avg.second) ratio /= (double)total_length_ / avg.second / 30;
-        double alpha = 1. / (5 + ratio);
+        double alpha = 1. / (15 + ratio);
         double avg_reward = std::max(std::sqrt(tot_sq_rewards_[i] / tot_length_[i]), 1e-3);
         avg.first = avg.first * (1 - alpha) + avg_reward * alpha;
         /*

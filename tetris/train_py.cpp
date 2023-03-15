@@ -146,9 +146,8 @@ static PyObject* TrainingManager_GetState(TrainingManager* self, PyObject* Py_UN
   auto mp = self->GetState();
   PyObject* dict = PyDict_New();
   for (const auto& [key, value] : mp) {
-    PyObject* py_key = Py_BuildValue("(iiiiii)",
-        key.start_level, key.hz_mode, key.step_points, key.target_column_mode,
-        key.start_line_mode, key.drought_mode);
+    PyObject* py_key = Py_BuildValue("(iiii)",
+        key.hz_mode, key.step_points, key.target_column_mode, key.drought_mode);
     PyObject* py_value = Py_BuildValue("(dl)", value.first, value.second);
     PyDict_SetItem(dict, py_key, py_value);
     Py_DECREF(py_key);
@@ -172,9 +171,8 @@ static PyObject* TrainingManager_LoadState(TrainingManager* self, PyObject* args
   for (Py_ssize_t pos = 0; PyDict_Next(state, &pos, &key, &value);) {
     NormalizingParams nkey;
     std::pair<double, int64_t> nval;
-    if (!PyArg_ParseTuple(key, "iiiiii",
-        &nkey.start_level, &nkey.hz_mode, &nkey.step_points, &nkey.target_column_mode,
-        &nkey.start_line_mode, &nkey.drought_mode)) {
+    if (!PyArg_ParseTuple(key, "iiii",
+        &nkey.hz_mode, &nkey.step_points, &nkey.target_column_mode, &nkey.drought_mode)) {
       return nullptr;
     }
     if (!PyArg_ParseTuple(value, "dl", &nval.first, &nval.second)) {

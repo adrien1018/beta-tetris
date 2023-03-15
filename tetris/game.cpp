@@ -714,9 +714,9 @@ Tetris::State Tetris::GetState() const {
   }
   // 51-53: step_points_
   if (step_points_ >= 1000) {
-    misc[51] = 1; // 3000
+    misc[51] = 1; // 4000
   } else if (step_points_ >= 100) {
-    misc[52] = 1; // 200
+    misc[52] = 1; // 400
   } else {
     misc[53] = 1; // 40
   }
