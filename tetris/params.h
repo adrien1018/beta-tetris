@@ -6,7 +6,6 @@
 struct NormalizingParams {
   int hz_mode;
   int step_points;
-  int target_column_mode;
   int drought_mode;
 
   bool operator==(const NormalizingParams&) const = default;
@@ -21,7 +20,7 @@ struct hash<NormalizingParams> {
     size_t a = 0;
     a += (x.hz_mode + x.drought_mode * 2235) * 6093894908103630263L;
     a ^= a >> 32;
-    a += (x.step_points + x.target_column_mode) * 3691759670834417381L;
+    a += x.step_points * 3691759670834417381L;
     a ^= a >> 28;
     return a;
   }
