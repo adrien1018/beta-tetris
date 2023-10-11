@@ -14,6 +14,7 @@ from torch.nn import functional as F
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+N = 2000
 hz_avg = 12
 hz_dev = 0
 microadj_delay = 21
@@ -21,13 +22,14 @@ start_level = 18
 drought_mode = False
 step_points = 100.
 
+board_file = None
+use_sample = False
+
 def ResetGame(game):
     game.ResetGame(hz_avg = hz_avg, hz_dev = hz_dev, drought_mode = drought_mode,
                    microadj_delay = microadj_delay, start_level = start_level,
                    step_points = step_points)
 
-#def GetSeed(i):
-#    return (i * 1242973851 + 1)
 def GetSeed(i):
     return (i * 42973851 + 45)
 
@@ -108,8 +110,7 @@ def Main(model_path):
     else: model.load_state_dict(torch.load(model_path))
     model.eval()
 
-    batch_size = 512
-    n = 1000
+    batch_size = 1024
     q_size = 256
     assert batch_size % q_size == 0
     n_workers = batch_size // q_size
@@ -121,71 +122,98 @@ def Main(model_path):
     started = batch_size
     results = []
 
-    st = set()
-    #with open('logs/boards30.bin', 'rb') as f:
-    #    while True:
-    #        item = f.read(25)
-    #        if len(item) == 0: break
-    #        assert len(item) == 25
-    #        st.add(item)
-    #of = open('logs/progress/30-4.txt', 'w')
+    if board_file:
+        st = set()
+        try:
+            with open(board_file, 'rb') as f:
+                while True:
+                    item = f.read(25)
+                    if len(item) == 0: break
+                    assert len(item) == 25
+                    st.add(item)
+        except FileNotFoundError:
+            pass
+        last_save = time.time()
+        save_num = 0
 
-    while len(results) < n:
-        for i in workers: i.child.send(('query', None))
-        states = [i.child.recv() for i in workers]
-        state_lens = [0 if i is None else i.shape[0] for i in states]
-        states = [i for i in states if i is not None]
-        states = obs_to_torch(np.concatenate(states), device)
+    def Save(fname, to_sort=False):
+        nonlocal last_save
+        with open(fname, 'wb') as f:
+            if to_sort:
+                for i in sorted(st): f.write(i)
+            else:
+                for i in st: f.write(i)
+        last_save = time.time()
 
-        states_num = states[:,0].view(-1, 200)
-        states_num = states_num.cpu().numpy().astype(bool)
-        states_num = np.packbits(states_num, axis = 1, bitorder = 'little')
-        st.update(map(lambda x: x.tobytes(), states_num))
-        #print(len(st), file=of, flush=True)
+    try:
+        while len(results) < N:
+            for i in workers: i.child.send(('query', None))
+            states = [i.child.recv() for i in workers]
+            state_lens = [0 if i is None else i.shape[0] for i in states]
+            states = [i for i in states if i is not None]
+            states = obs_to_torch(np.concatenate(states), device)
 
-        pi = model(states, False)[0]
-        pi = torch.argmax(pi, 1)
+            if board_file:
+                states_num = states[:,0].view(-1, 200)
+                states_num = states_num.cpu().numpy().astype(bool)
+                states_num = np.packbits(states_num, axis = 1, bitorder = 'little')
+                st.update(map(lambda x: x.tobytes(), states_num))
 
-        j = 0
-        for i in range(n_workers):
-            workers[i].child.send(('step', pi[j:j+state_lens[i]].view(-1).cpu().numpy()))
-            j += state_lens[i]
-        old_started = len(results)
+            pi = model(states, use_sample)[0]
+            if use_sample:
+                pi = pi.sample()
+            else:
+                pi = torch.argmax(pi, 1)
+
+            j = 0
+            for i in range(n_workers):
+                workers[i].child.send(('step', pi[j:j+state_lens[i]].view(-1).cpu().numpy()))
+                j += state_lens[i]
+            old_started = len(results)
+            for i in workers:
+                worker_res = i.child.recv()
+                results += worker_res
+                ids = []
+                for _ in worker_res:
+                    if started < N:
+                        ids.append(started)
+                        started += 1
+                    else:
+                        ids.append(None)
+                i.child.send(('reset', ids))
+            for i in workers: i.child.recv()
+
+            if old_started // 50 != len(results) // 50:
+                text = f'{len(results)} / {N} games started'
+                if board_file: text += f'; {len(st)} boards collected'
+                print(text)
+
+            if time.time() - last_save >= 3600:
+                Save(board_file + f'.{save_num}')
+                save_num = 1 - save_num
+
         for i in workers:
-            worker_res = i.child.recv()
-            results += worker_res
-            ids = []
-            for _ in worker_res:
-                if started < n:
-                    ids.append(started)
-                    started += 1
-                else:
-                    ids.append(None)
-            i.child.send(('reset', ids))
-        for i in workers: i.child.recv()
-        if old_started // 50 != len(results) // 50: print(len(results), '/', n, 'games started')
+            i.child.send(('close', None))
+            i.child.close()
+    except:
+        Save(board_file)
+        raise
 
-    for i in workers:
-        i.child.send(('close', None))
-        i.child.close()
-
-    #with open('logs/boards30.bin', 'wb') as f:
-    #    for i in sorted(st): f.write(i)
-    #of.close()
+    Save(board_file)
 
     s = list(reversed(sorted([i[0] for i in results])))
     print(s)
     mx = s[0] // 50000 * 50000
     for i in range(len(s) - 1):
         for t in range(mx, 0, -50000):
-            if s[i] >= t and s[i+1] < t: print(t, (i + 1) / n)
-    print(np.mean(s), np.std(s), np.std(s) / (n ** 0.5))
+            if s[i] >= t and s[i+1] < t: print(t, (i + 1) / N)
+    print(np.mean(s), np.std(s), np.std(s) / (N ** 0.5))
     s = list(reversed(sorted([i[1] for i in results])))
     mx = s[0] // 10 * 10
     for i in range(len(s) - 1):
         for t in range(mx, 0, -10):
-            if s[i] >= t and s[i+1] < t: print(t, (i + 1) / n)
-    print(np.mean(s), np.std(s), np.std(s) / (n ** 0.5))
+            if s[i] >= t and s[i+1] < t: print(t, (i + 1) / N)
+    print(np.mean(s), np.std(s), np.std(s) / (N ** 0.5))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -196,6 +224,9 @@ if __name__ == "__main__":
     parser.add_argument('--start-level', type = int)
     parser.add_argument('--step-points', type = float)
     parser.add_argument('--drought-mode', action = 'store_true')
+    parser.add_argument('--n', type = int)
+    parser.add_argument('--board-file', type = str)
+    parser.add_argument('--use-sample', action = 'store_true')
     args = parser.parse_args()
     print(args)
     if args.hz_avg is not None: hz_avg = args.hz_avg
@@ -203,5 +234,8 @@ if __name__ == "__main__":
     if args.microadj_delay is not None: microadj_delay = args.microadj_delay
     if args.start_level is not None: start_level = args.start_level
     if args.step_points is not None: step_points = args.step_points
+    if args.n is not None: N = args.n
     drought_mode = args.drought_mode
+    board_file = args.board_file
+    use_sample = args.use_sample
     Main(args.model)
