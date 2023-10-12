@@ -110,7 +110,7 @@ def Main(model_path):
     else: model.load_state_dict(torch.load(model_path))
     model.eval()
 
-    batch_size = 1024
+    batch_size = 512
     q_size = 256
     assert batch_size % q_size == 0
     n_workers = batch_size // q_size
@@ -125,7 +125,7 @@ def Main(model_path):
     if board_file:
         st = set()
         try:
-            with open(board_file, 'rb') as f:
+            with open(board_file, 'rb', buffering=1048576) as f:
                 while True:
                     item = f.read(25)
                     if len(item) == 0: break
@@ -138,7 +138,7 @@ def Main(model_path):
 
     def Save(fname, to_sort=False):
         nonlocal last_save
-        with open(fname, 'wb') as f:
+        with open(fname, 'wb', buffering=1048576) as f:
             if to_sort:
                 for i in sorted(st): f.write(i)
             else:
@@ -188,7 +188,7 @@ def Main(model_path):
                 if board_file: text += f'; {len(st)} boards collected'
                 print(text)
 
-            if time.time() - last_save >= 3600:
+            if board_file and time.time() - last_save >= 3600:
                 Save(board_file + f'.{save_num}')
                 save_num = 1 - save_num
 
@@ -196,10 +196,13 @@ def Main(model_path):
             i.child.send(('close', None))
             i.child.close()
     except:
-        Save(board_file)
+        if board_file: Save(board_file)
+        for i in workers:
+            i.child.send(('close', None))
+            i.child.close()
         raise
 
-    Save(board_file)
+    if board_file: Save(board_file)
 
     s = list(reversed(sorted([i[0] for i in results])))
     print(s)
