@@ -1,5 +1,7 @@
 # BetaTetris
 
+**The newest BetaTetris version is in [BetaTetris Tablebase](https://github.com/adrien1018/betatetris-tablebase)**
+
 An actor-critic neural network agent playing NES Tetris with tapping speed and reaction time limitations.
 
 This is the left well & improved version of the agent featured in [Classic Tetris AI Exhibition](https://www.twitch.tv/videos/1073802901).
