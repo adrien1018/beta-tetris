@@ -31,7 +31,7 @@ def ResetGame(game):
                    step_points = step_points)
 
 def GetSeed(i):
-    return (i * 42973851 + 45)
+    return (i * 42973851 + 47)
 
 def worker_process(remote, q_size, id):
     games = [tetris.Tetris(GetSeed(i)) for i in range(q_size)]

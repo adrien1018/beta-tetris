@@ -172,7 +172,7 @@ if __name__ == "__main__":
     GetStrat(model, tetris.Tetris())
 
     print('Ready')
-    HOST, PORT = 'localhost', 3456
+    HOST, PORT = '0.0.0.0', 3456
     with socketserver.TCPServer((HOST, PORT), GameConn) as server:
         try:
             server.serve_forever()

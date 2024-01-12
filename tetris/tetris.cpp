@@ -911,6 +911,7 @@ class Tetris {
       int reduce = (lines - 280) / 2 * 2;
       pieces -= reduce * 10 / 4;
       lines -= reduce;
+      level = GetLevel_(start_level_, lines);
     }
     misc[18] = level * 1e-1;
     // 19: lines
